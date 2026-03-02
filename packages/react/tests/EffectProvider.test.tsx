@@ -221,4 +221,257 @@ describe("EffectProvider", () => {
       expect(message).toBe("Hello, World!");
     });
   });
+
+  describe("nested providers (Layer composition)", () => {
+    it("child provider merges parent layer - accesses both services", async () => {
+      class ServiceA extends Effect.Tag("ServiceA")<
+        ServiceA,
+        { readonly value: string }
+      >() {}
+
+      class ServiceB extends Effect.Tag("ServiceB")<
+        ServiceB,
+        { readonly value: string }
+      >() {}
+
+      const parentLayer = Layer.succeed(ServiceA, { value: "from-parent" });
+      const childLayer = Layer.succeed(ServiceB, { value: "from-child" });
+
+      const capturedValues: Array<{ readonly a: string; readonly b: string }> =
+        [];
+
+      const Consumer = () => {
+        const rt = useEffectRuntime<ServiceA | ServiceB, never>();
+        void rt
+          .runPromise(
+            Effect.gen(function* () {
+              const a = yield* ServiceA;
+              const b = yield* ServiceB;
+              return { a: a.value, b: b.value };
+            }),
+          )
+          .then((v) => {
+            capturedValues.push(v);
+          });
+        return null;
+      };
+
+      render(
+        <EffectProvider layer={parentLayer}>
+          <EffectProvider layer={childLayer}>
+            <Consumer />
+          </EffectProvider>
+        </EffectProvider>,
+      );
+
+      await vi.waitFor(() => {
+        expect(capturedValues.length).toBeGreaterThanOrEqual(1);
+      });
+
+      const captured = capturedValues.at(-1);
+      expect(captured).toBeDefined();
+      if (captured === undefined) throw new Error("unreachable");
+      expect(captured.a).toBe("from-parent");
+      expect(captured.b).toBe("from-child");
+    });
+
+    it("child provider overrides parent service with same tag", async () => {
+      class ServiceA extends Effect.Tag("ServiceA_Override")<
+        ServiceA,
+        { readonly value: number }
+      >() {}
+
+      const parentLayer = Layer.succeed(ServiceA, { value: 1 });
+      const childLayer = Layer.succeed(ServiceA, { value: 2 });
+
+      const capturedValues: number[] = [];
+
+      const Consumer = () => {
+        const rt = useEffectRuntime<ServiceA, never>();
+        void rt.runPromise(Effect.map(ServiceA, (s) => s.value)).then((v) => {
+          capturedValues.push(v);
+        });
+        return null;
+      };
+
+      render(
+        <EffectProvider layer={parentLayer}>
+          <EffectProvider layer={childLayer}>
+            <Consumer />
+          </EffectProvider>
+        </EffectProvider>,
+      );
+
+      await vi.waitFor(() => {
+        expect(capturedValues.length).toBeGreaterThanOrEqual(1);
+      });
+
+      // Child layer overrides parent: value should be 2
+      expect(capturedValues.at(-1)).toBe(2);
+    });
+
+    it("child provider disposes independently from parent", async () => {
+      class ServiceA extends Effect.Tag("ServiceA_Dispose")<
+        ServiceA,
+        { readonly value: string }
+      >() {}
+
+      class ServiceB extends Effect.Tag("ServiceB_Dispose")<
+        ServiceB,
+        { readonly value: string }
+      >() {}
+
+      const parentLayer = Layer.succeed(ServiceA, { value: "parent" });
+      const childLayer = Layer.succeed(ServiceB, { value: "child" });
+
+      const capturedChildRts: EffectManagedRuntime<
+        ServiceA | ServiceB,
+        never
+      >[] = [];
+      const capturedParentRts: EffectManagedRuntime<ServiceA, never>[] = [];
+
+      const ChildConsumer = () => {
+        const rt = useEffectRuntime<ServiceA | ServiceB, never>();
+        if (
+          capturedChildRts.length === 0 ||
+          capturedChildRts[capturedChildRts.length - 1] !== rt
+        ) {
+          capturedChildRts.push(rt);
+        }
+        return null;
+      };
+
+      const ParentConsumer = () => {
+        const rt = useEffectRuntime<ServiceA, never>();
+        if (
+          capturedParentRts.length === 0 ||
+          capturedParentRts[capturedParentRts.length - 1] !== rt
+        ) {
+          capturedParentRts.push(rt);
+        }
+        return null;
+      };
+
+      const ChildWrapper = ({ showChild }: { readonly showChild: boolean }) => (
+        <EffectProvider layer={parentLayer}>
+          <ParentConsumer />
+          {showChild ? (
+            <EffectProvider layer={childLayer}>
+              <ChildConsumer />
+            </EffectProvider>
+          ) : null}
+        </EffectProvider>
+      );
+
+      const { rerender } = render(<ChildWrapper showChild={true} />);
+
+      // Wait for both runtimes
+      await vi.waitFor(() => {
+        expect(capturedChildRts.length).toBeGreaterThanOrEqual(1);
+        expect(capturedParentRts.length).toBeGreaterThanOrEqual(1);
+      });
+
+      const capturedChildRt = capturedChildRts.at(-1);
+      expect(capturedChildRt).toBeDefined();
+      if (capturedChildRt === undefined) throw new Error("unreachable");
+
+      // Child runtime works
+      const childValue = await capturedChildRt.runPromise(
+        Effect.map(ServiceB, (s) => s.value),
+      );
+      expect(childValue).toBe("child");
+
+      // Unmount child provider
+      rerender(<ChildWrapper showChild={false} />);
+
+      // Child runtime should be disposed
+      await expect(
+        capturedChildRt.runPromise(Effect.succeed(1)),
+      ).rejects.toThrow();
+
+      // Parent runtime should still work
+      const capturedParentRt = capturedParentRts.at(-1);
+      expect(capturedParentRt).toBeDefined();
+      if (capturedParentRt === undefined) throw new Error("unreachable");
+      const parentValue = await capturedParentRt.runPromise(
+        Effect.map(ServiceA, (s) => s.value),
+      );
+      expect(parentValue).toBe("parent");
+    });
+
+    it("test layer replaces production service (DI mock pattern)", async () => {
+      class ApiService extends Effect.Tag("ApiService_Test")<
+        ApiService,
+        { readonly fetch: (url: string) => Effect.Effect<string> }
+      >() {}
+
+      const productionLayer = Layer.succeed(ApiService, {
+        fetch: (url) => Effect.succeed(`production: ${url satisfies string}`),
+      });
+
+      const testLayer = Layer.succeed(ApiService, {
+        fetch: (url) => Effect.succeed(`mocked: ${url satisfies string}`),
+      });
+
+      const capturedValues: string[] = [];
+
+      const Consumer = () => {
+        const rt = useEffectRuntime<ApiService, never>();
+        void rt
+          .runPromise(
+            Effect.gen(function* () {
+              const api = yield* ApiService;
+              return yield* api.fetch("/data");
+            }),
+          )
+          .then((v) => {
+            capturedValues.push(v);
+          });
+        return null;
+      };
+
+      // Use test layer instead of production layer
+      render(
+        <EffectProvider layer={testLayer}>
+          <Consumer />
+        </EffectProvider>,
+      );
+
+      await vi.waitFor(() => {
+        expect(capturedValues.length).toBeGreaterThanOrEqual(1);
+      });
+
+      expect(capturedValues.at(-1)).toBe("mocked: /data");
+
+      // Now verify with production layer would give different result
+      const productionValues: string[] = [];
+
+      const ProductionConsumer = () => {
+        const rt = useEffectRuntime<ApiService, never>();
+        void rt
+          .runPromise(
+            Effect.gen(function* () {
+              const api = yield* ApiService;
+              return yield* api.fetch("/data");
+            }),
+          )
+          .then((v) => {
+            productionValues.push(v);
+          });
+        return null;
+      };
+
+      render(
+        <EffectProvider layer={productionLayer}>
+          <ProductionConsumer />
+        </EffectProvider>,
+      );
+
+      await vi.waitFor(() => {
+        expect(productionValues.length).toBeGreaterThanOrEqual(1);
+      });
+
+      expect(productionValues.at(-1)).toBe("production: /data");
+    });
+  });
 });
