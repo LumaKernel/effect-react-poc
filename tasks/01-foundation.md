@@ -43,10 +43,10 @@
 
 ### 1.5 EffectObserver 実装
 
-- [ ] 単一のEffectStoreエントリを監視
-- [ ] `Subscribable<EffectResult<A, E>>`を実装
-- [ ] 最初のsubscribeでEffect実行開始（lazy acquisition）
-- [ ] 最後のunsubscribeでクリーンアップ開始
+- [x] 単一のEffectStoreエントリを監視
+- [x] `Subscribable<EffectResult<A, E>>`を実装
+- [x] 最初のsubscribeでEffect実行開始（lazy acquisition）
+- [x] 最後のunsubscribeでクリーンアップ開始
 
 **テスト計画**:
 - 最初のsubscribeでeffect実行が開始される

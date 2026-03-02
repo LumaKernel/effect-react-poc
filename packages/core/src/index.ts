@@ -34,3 +34,5 @@ export type {
 } from "./EffectStore.js";
 
 export { createEffectStore } from "./EffectStore.js";
+
+export { createEffectObserver } from "./EffectObserver.js";
