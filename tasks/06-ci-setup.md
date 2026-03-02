@@ -8,14 +8,14 @@
 
 ### 6.1 基本CIワークフロー
 
-- [ ] GitHub Actions ワークフロー作成 (`.github/workflows/ci.yml`)
+- [x] GitHub Actions ワークフロー作成 (`.github/workflows/ci.yml`)
   - pnpm install
   - typecheck (`tsc -b`)
   - lint (`eslint . && prettier . --check`)
   - test (`vitest run`)
   - coverage (`vitest run --coverage`)
-- [ ] Node.js バージョンマトリクス (22.x)
-- [ ] pnpm キャッシュ設定
+- [x] Node.js バージョンマトリクス (22.x)
+- [x] pnpm キャッシュ設定
 
 ### 6.2 カバレッジゲート
 
