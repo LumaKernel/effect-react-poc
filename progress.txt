@@ -32,6 +32,7 @@
 - `luma-ts/no-date`: `Date.now()` 禁止。`getNow()` ラッパー + eslint-disable で対処（Temporal未対応環境）
 - EffectStore config: `gcTime` (旧 gcGracePeriodMs) + `staleTime` (default: 0 = 常にstale)
 - `resetEntry` vs `cleanupEntry`: resetEntry は subscriber 維持（clearCache用）、cleanupEntry は完全削除（GC用）
+- EffectStore retry: `Schedule.tapOutput` でリトライ回数カウント。`RunOptions<E>` で schedule を渡し、`RetryState` を別 `Subscribable` で公開
 
 ## 2026-03-03 - 初期セットアップ
 - 実装した内容:
@@ -390,4 +391,32 @@
   - `store.isStale(key)` を再利用して stale 判定を一箇所に集約。新機能追加時も既存メソッドの組み合わせで実現可能
   - jsdom テストで `visibilityState` を変更するには `Object.defineProperty(document, "visibilityState", { value: "visible", writable: true, configurable: true })` が必要
   - `window.addEventListener` のスパイテストでは `vi.spyOn` の `mockRestore()` を忘れずに
+---
+
+## 2026-03-03 - リトライ・スケジュール統合 (タスク 3.3)
+- 実装した内容:
+  - EffectStore.run に `schedule` オプション追加（`Effect.retry(effect, schedule)` で内部ラップ）
+  - `RetryState` メタデータ（`attempt` 回数、`retrying` フラグ）を `Subscribable` で公開
+  - `getRetrySubscribable(key)` / `getRetryState(key)` メソッド追加
+  - EffectObserver に `schedule` オプションをパススルー
+  - useEffectQuery に `schedule` オプション追加（`UseEffectQueryOptions<E>`）
+  - invalidate 時にストアした schedule を再利用
+  - clearCache / dispose 時にリトライ状態をリセット
+  - 指数バックオフ (`Schedule.exponential`) や回数制限 (`Schedule.recurs`) に対応
+  - 15テスト追加（EffectStore: 11, EffectObserver: 2, useEffectQuery: 2）、合計189テスト
+- 変更したファイル:
+  - packages/core/src/EffectStore.ts (RunOptions, RetryState, schedule対応)
+  - packages/core/src/EffectObserver.ts (EffectObserverOptions追加)
+  - packages/core/src/index.ts (RetryState, RunOptions, EffectObserverOptions エクスポート)
+  - packages/core/tests/EffectStore.test.ts (11テスト追加)
+  - packages/core/tests/EffectObserver.test.ts (2テスト追加)
+  - packages/react/src/useEffectQuery.ts (UseEffectQueryOptions追加)
+  - packages/react/src/index.ts (UseEffectQueryOptions エクスポート)
+  - packages/react/tests/useEffectQuery.test.tsx (2テスト追加)
+- カバレッジ: 100% → 100% (変化なし)
+- **今後のイテレーションへの学び:**
+  - `Schedule.tapOutput` は schedule が「続行する」と判断した時のみ発火。`Schedule.tapInput` は全入力で発火（schedule が止まる最終入力でも発火）。リトライ回数カウントには `tapOutput` が正確
+  - `Schedule.Schedule<Out, In>` の `In` パラメータはデフォルトが `unknown` なので省略可能。ESLint `@typescript-eslint/no-unnecessary-type-arguments` で指摘される
+  - store 内部の型消去で `Schedule.Schedule<unknown, E>` → `Schedule.Schedule<unknown>` にキャストが必要。既存の EffectResult 型消去パターンと一貫
+  - `exactOptionalPropertyTypes` 有効時、`{ schedule: maybeUndefined }` は型エラー。`schedule ? { schedule } : undefined` で条件付きオブジェクト生成が必要
 ---
