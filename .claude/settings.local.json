@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx storybook@latest init:*)",
+      "Bash(npx prettier:*)",
+      "WebFetch(domain:docs.codecov.com)",
+      "WebFetch(domain:next-intl.dev)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:www2.yukawa.kyoto-u.ac.jp)",
+      "Bash(claude -p --dangerously-skip-permissions \"echo hello\" --output-format text)",
+      "Bash(timeout 5 claude:*)",
+      "Bash(claude --version:*)",
+      "WebFetch(domain:containers.dev)",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(docker volume ls:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker exec:*)",
+      "Bash(curl -sI http://localhost:22606/sb-manager/runtime.js)",
+      "Bash(curl -s http://localhost:22606/sb-addons/docs-4/manager-bundle.js)",
+      "Bash(npm --version:*)",
+      "Bash(node --version:*)"
+    ]
+  }
+}
