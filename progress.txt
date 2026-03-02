@@ -1,0 +1,33 @@
+## Codebase Patterns
+- pnpmワークスペース: `packages/core/`, `packages/react/`, `examples/`
+- TypeScript: strict mode, ESM, `verbatimModuleSyntax`, project references
+- テスト: vitest, coverage v8, テストファイルは `packages/*/tests/`
+- lint: ESLint flat config + typescript-eslint strict + @luma-dev/eslint-plugin-luma-ts (全ルール有効)
+- format: Prettier
+- scripts: `lint`, `lint-fix`, `test`, `test:run`, `coverage`, `typecheck`
+- tsconfigのプロジェクト参照: テスト用は `tsconfig.test.json`, ルート設定用は `tsconfig.node.json`
+
+## 2026-03-03 - 初期セットアップ
+- 実装した内容:
+  - pnpmワークスペース + モノレポ構成
+  - TypeScript strict mode, ESM, project references
+  - vitest設定 + カバレッジ (v8, 100%閾値)
+  - ESLint flat config + typescript-eslint strict + @luma-dev/eslint-plugin-luma-ts 全ルール有効
+  - Prettier設定
+  - packages/core/ と packages/react/ のスケルトン (空のindex.ts + 基本テスト)
+  - Effect.ts ^3.19.19 依存追加 (packages/core, packages/react)
+  - CIセットアップタスクファイル (tasks/06-ci-setup.md) 作成
+  - ドキュメントタスクファイル (tasks/07-documentation.md) 作成
+- 変更したファイル:
+  - package.json, pnpm-workspace.yaml, tsconfig.json, tsconfig.node.json
+  - vitest.config.ts, eslint.config.js, .prettierrc, .prettierignore, .gitignore
+  - packages/core/ (package.json, tsconfig.json, tsconfig.test.json, src/index.ts, tests/index.test.ts)
+  - packages/react/ (package.json, tsconfig.json, tsconfig.test.json, src/index.ts, tests/index.test.ts)
+  - tasks/06-ci-setup.md, tasks/07-documentation.md
+- カバレッジ: 0% (実装コードなし、index.tsはexclude対象)
+- **今後のイテレーションへの学び:**
+  - テストファイルはtsconfigに含める必要がある → 各パッケージに `tsconfig.test.json` を用意
+  - ESLintのprojectServiceはtsconfigに含まれないファイルをパースできない
+  - vitest.config.tsなどのルートファイル用に `tsconfig.node.json` が必要
+  - `pnpm approve-builds` は対話的UIのため、`package.json` の `pnpm.onlyBuiltDependencies` で設定する
+---
