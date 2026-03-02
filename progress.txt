@@ -51,6 +51,31 @@
 - v8 coverage: switch の同一処理 case は統合する（CI/localでカバレッジ差異が出るフレーク防止）
 - EffectBoundary renderError: `Cause<unknown>` を受け取る（型消去）。`instanceof` で AppError に runtime narrowing
 
+## 2026-03-03 - retry-with-fallback example (タスク 4.9)
+- 実装した内容:
+  - examples/retry-with-fallback: リトライとフォールバックパターンのデモ
+  - errors.ts: ApiError (Data.TaggedError) + AppError union
+  - api.ts: fetchFromPrimaryApi（高確率失敗）、fetchFromFallbackApi（初回失敗）、fetchFromLocalCache（常成功）
+    - retrySchedule: Schedule.intersect(exponential("100 millis"), recurs(2)) で3回試行
+    - fetchWithFallbackChain: Effect.retry + Effect.catchAll で3段フォールバック
+  - RetryProgress.tsx: store.getRetrySubscribable(key) + useSyncExternalStore でリトライ進捗バー表示（attempt数/最大数）
+  - RetryDemo.tsx: useEffectQuery + schedule オプション + 手動リトライ(store.invalidate) + リセット(generation変更)
+  - FallbackChainDemo.tsx: 3段フォールバックチェーン。結果ソース（Primary/Fallback/Cache）を色分け表示
+  - ScheduleCompositionDemo.tsx: 3種のSchedule戦略を並列比較（recurs、exponential+recurs、spaced+recurs）
+  - App.tsx: EffectProvider(Layer.empty) + 3セクション構成
+- 変更したファイル:
+  - examples/retry-with-fallback/ (新規: package.json, tsconfig.json, vite.config.ts, index.html, src/*.tsx, src/*.ts)
+  - tsconfig.json (examples/retry-with-fallback 参照追加)
+  - pnpm-lock.yaml
+- カバレッジ: 100% → 100% (変化なし、examples はカバレッジ対象外)
+- **今後のイテレーションへの学び:**
+  - `Schedule.intersect(a, b)` は両方の条件を同時に満たす場合のみ続行。exponential + recurs の組み合わせで「指数バックオフ、最大N回」を表現
+  - `Schedule.spaced(duration)` は固定間隔リトライ。`Schedule.exponential(base)` は指数増加
+  - `store.getRetrySubscribable(key)` + `useSyncExternalStore` でリトライ進捗をリアルタイム購読可能。RetryState は { attempt, retrying }
+  - `store.invalidate(key)` で手動リトライ（スケジュールは保存済みのものが再利用される）
+  - `luma-ts/require-satisfies-in-tls` はテンプレートリテラル内の全ての式に `satisfies string` 等が必要（`QUERY_KEY` のような定数文字列変数も含む）
+---
+
 ## 2026-03-03 - typed-errors example (タスク 4.8)
 - 実装した内容:
   - examples/typed-errors: 型付きエラーハンドリングのデモ
