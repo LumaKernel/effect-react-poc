@@ -20,3 +20,7 @@ export { useEffectMutation } from "./useEffectMutation.js";
 export type { StreamResult } from "./useEffectStream.js";
 
 export { useEffectStream } from "./useEffectStream.js";
+
+export type { ScopeHandle } from "./useEffectScope.js";
+
+export { useEffectScope } from "./useEffectScope.js";
