@@ -25,6 +25,7 @@
 - useEffectStream: `Stream.runForEach` + `Effect.catchAll` でストリーム消費。interrupt は自然伝搬、typed errors のみ catch
 - Stream テスト: `createControllableStream` ヘルパーで `emit/end/fail` を外部制御（`Stream.async` の Emit API を型安全にラップ）
 - useEffectScope: `Effect.runSync` で Scope 操作（ManagedRuntime 不要）。`useEffect` 内でScope作成・close
+- EffectBoundary: Suspense + ErrorBoundary 統合。`renderError` 未指定時はエラー伝搬。非 EffectError は常に親に伝搬
 
 ## 2026-03-03 - 初期セットアップ
 - 実装した内容:
@@ -276,4 +277,26 @@
   - `useMemo` でScope作成すると、React render中の副作用になりうる。`useEffect` 内で作成する方が安全
   - `vi.fn()` のモックは `any` を返すため、`Effect.sync(() => fn())` はESLintの `no-unsafe-return` エラーになる。ブロック構文 `Effect.sync(() => { fn(); })` で回避
   - `useEffectRuntime()` を呼ぶだけでProvider外使用のガードになる（戻り値を使わなくても検証は走る）
+---
+
+## 2026-03-03 - EffectBoundary コンポーネント実装 (タスク 2.7)
+- 実装した内容:
+  - `EffectBoundary<E>` コンポーネント: Suspense + ErrorBoundary の統合コンポーネント
+  - `fallback` prop: Suspense の fallback（loading中の表示）
+  - `renderError` prop (optional): EffectError をキャッチして `Cause<E>` を受け取るレンダー関数
+  - `renderError` 未指定時は EffectError が親の ErrorBoundary に伝搬
+  - 非 EffectError は常に親の ErrorBoundary に伝搬（EffectBoundary では捕捉しない）
+  - ネストされた EffectBoundary で内側が独自のエラーハンドリングを持つケース対応
+  - 7テスト（Suspense統合、renderErrorでCause取得、Causeパターンマッチ、エラー伝搬、ネスト、非EffectError伝搬、StrictMode）
+- 変更したファイル:
+  - packages/react/src/EffectBoundary.tsx (新規)
+  - packages/react/src/index.ts (re-export追加)
+  - packages/react/tests/EffectBoundary.test.tsx (新規)
+  - tasks/02-react-integration.md (タスク2.7を完了マーク)
+- カバレッジ: 100% → 100% (EffectBoundary.tsx 100%)
+- **今後のイテレーションへの学び:**
+  - React ErrorBoundary は class component でしか実装できない（getDerivedStateFromError が関数コンポーネントに未対応）
+  - ErrorBoundary の re-throw: `getDerivedStateFromError` でキャッチしたエラーを render で re-throw すると親の ErrorBoundary に伝搬する。`@typescript-eslint/only-throw-error` の eslint-disable が必要（型が unknown のため）
+  - EffectBoundary は Suspense と ErrorBoundary を組み合わせるため、ErrorBoundary が Suspense の外側にある必要がある（ErrorBoundary > Suspense > children の順序）
+  - ネストされた Suspense テストでは、外側の Suspense が全子要素をブロックするため、外側のコンポーネントを同期 Effect にする必要がある
 ---

@@ -24,3 +24,7 @@ export { useEffectStream } from "./useEffectStream.js";
 export type { ScopeHandle } from "./useEffectScope.js";
 
 export { useEffectScope } from "./useEffectScope.js";
+
+export type { EffectBoundaryProps } from "./EffectBoundary.js";
+
+export { EffectBoundary } from "./EffectBoundary.js";
