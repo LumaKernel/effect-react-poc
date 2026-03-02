@@ -27,6 +27,7 @@
 - useEffectScope: `Effect.runSync` で Scope 操作（ManagedRuntime 不要）。`useEffect` 内でScope作成・close
 - EffectBoundary: Suspense + ErrorBoundary 統合。`renderError` 未指定時はエラー伝搬。非 EffectError は常に親に伝搬
 - EffectValue: React.memo + useRef で render prop の関数参照を安定化。effect も ref 化して memo 境界を維持
+- ネストProvider: `EffectLayerContext` で親Layerを共有 → `Layer.merge(parentLayer, childLayer)` で自動合成。子サービスが優先
 
 ## 2026-03-03 - 初期セットアップ
 - 実装した内容:
@@ -320,4 +321,24 @@
   - `React.memo` は props の浅い比較をするため、render prop (children関数) や毎回新規作成されるオブジェクト (Effect.succeed等) は memo を破る。`useRef` で参照を安定化し、ref オブジェクトを props として渡すことで memo 境界を維持する
   - テストで `data-testid` が複数テスト間で衝突することがある（Testing Library の cleanup が不完全な場合）。ユニークな testId を使うのが安全
   - 細粒度リアクティビティの核心は「外部コンポーネント (EffectValue) で ref を更新し、内部 memoized コンポーネント (EffectValueInner) で useSyncExternalStore 経由のみで再レンダーされる」パターン
+---
+
+## 2026-03-03 - Layer統合・ネストProvider (タスク 3.1)
+- 実装した内容:
+  - EffectProvider にネストされた Provider での Layer 自動合成機能を追加
+  - `EffectLayerContext` で親の Layer を型消去して共有
+  - 子 Provider は `Layer.merge(parentLayer, childLayer)` で自動合成、子のサービスが優先（オーバーライド）
+  - テスト用 Layer の差し替え（DI モック）パターンのテスト追加
+  - 子 Provider の独立した dispose テスト
+  - 4テスト追加（ネスト合成、サービスオーバーライド、独立dispose、DIモック）
+- 変更したファイル:
+  - packages/react/src/EffectProvider.tsx (EffectLayerContext追加、useMemo でLayer合成)
+  - packages/react/tests/EffectProvider.test.tsx (4テスト追加)
+  - tasks/03-advanced-features.md (タスク3.1を完了マーク)
+- カバレッジ: 100% → 100% (EffectProvider.tsx 100%)
+- **今後のイテレーションへの学び:**
+  - `Layer.merge(parentLayer, childLayer)` で第2引数のサービスが第1引数を上書きする（後勝ち）
+  - `createContext<Layer<any, any>>` で型消去した Layer をネストで共有し、`useMemo` で合成するパターンが有効
+  - デストラクチャリングパラメータに `readonly` は書けない（esbuild パースエラー）。型側の interface で `readonly` を指定
+  - `let` 変数にクロージャ経由で代入する場合、TypeScript の制御フロー解析が追跡できず `never` 型になる。配列に push して `.at(-1)` で取得するパターンで回避
 ---
