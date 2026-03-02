@@ -49,6 +49,30 @@
 - Deferred ゲートパターン: Stream.paginateChunkEffect 内で `Deferred.await` → React ref 経由で `Deferred.succeed` するとユーザー操作でストリーム進行を制御可能
 - `Deferred.make<undefined>()` を使う（`void` は `@typescript-eslint/no-invalid-void-type` でエラー）
 - v8 coverage: switch の同一処理 case は統合する（CI/localでカバレッジ差異が出るフレーク防止）
+- EffectBoundary renderError: `Cause<unknown>` を受け取る（型消去）。`instanceof` で AppError に runtime narrowing
+
+## 2026-03-03 - typed-errors example (タスク 4.8)
+- 実装した内容:
+  - examples/typed-errors: 型付きエラーハンドリングのデモ
+  - errors.ts: NetworkError, ValidationError, NotFoundError, TimeoutError の4つの Data.TaggedError + AppError union
+  - api.ts: fetchUserProfile（ランダムエラー）、submitForm（バリデーション）、fetchUserWithFallback（catchTag で NotFoundError を回復）
+  - ErrorDisplay.tsx: Cause.match で Fail/Die/Interrupt/Sequential/Parallel/Empty を網羅的にハンドリング。AppError は instanceof で runtime narrowing して色分け表示
+  - QueryDemo.tsx: useEffectQuery + matchEffectResult + ErrorDisplay で全状態ハンドリング
+  - CatchTagDemo.tsx: Effect.catchTag で NotFoundError を回復。Cause.failureOption で型安全にエラー取得。narrowed error type の switch で exhaustive マッチ
+  - BoundaryDemo.tsx: useEffectSuspense + EffectBoundary で Suspense ベースのエラー表示
+  - App.tsx: EffectProvider(Layer.empty) + 3セクション構成
+- 変更したファイル:
+  - examples/typed-errors/ (新規: package.json, tsconfig.json, vite.config.ts, index.html, src/*.tsx, src/*.ts)
+  - tsconfig.json (examples/typed-errors 参照追加)
+  - pnpm-lock.yaml
+- カバレッジ: 100% → 100% (変化なし、examples はカバレッジ対象外)
+- **今後のイテレーションへの学び:**
+  - EffectBoundary の `renderError` は `Cause<unknown>` を渡す（getDerivedStateFromError が static で型パラメータを保持できない）。typed error を使う場合は `instanceof` で runtime narrowing が必要
+  - `luma-ts/no-explicit-return-is`: 明示的な型ガード `value is T` は禁止。`toFoo(value): Foo | null` パターンで nullable を返し、呼び出し側で null チェックする
+  - `Cause.match` は onEmpty, onFail, onDie, onInterrupt, onSequential, onParallel の6ケースで網羅。戻り値型が `Z` となるため、JSX の return type と合わないことがある → `<>{rendered}</>` でラップ
+  - `Cause.failureOption(cause)` で `Option<E>` として fail value を安全に抽出。`Option.isSome` で narrowing
+  - `Effect.catchTag("Tag", handler)` は union エラー型から特定のタグを除去し、型を自動 narrow する
+---
 
 ## 2026-03-03 - parallel-requests example (タスク 4.7)
 - 実装した内容:
