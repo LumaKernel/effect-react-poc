@@ -33,6 +33,7 @@
     { "path": "examples/parallel-requests" },
     { "path": "examples/typed-errors" },
     { "path": "examples/retry-with-fallback" },
+    { "path": "examples/resource-cleanup" },
     { "path": "tsconfig.node.json" }
   ],
   "files": []
