@@ -6,6 +6,8 @@
 - format: Prettier
 - scripts: `lint`, `lint-fix`, `test`, `test:run`, `coverage`, `typecheck`
 - tsconfigのプロジェクト参照: テスト用は `tsconfig.test.json`, ルート設定用は `tsconfig.node.json`
+- EffectResult: `Data.struct` で構造的等値性、型ガードは TypeScript 推論 (`no-explicit-return-is`)
+- テンプレートリテラル内の式: `satisfies string` が必要 (`luma-ts/require-satisfies-in-tls`)
 
 ## 2026-03-03 - 初期セットアップ
 - 実装した内容:
@@ -30,4 +32,25 @@
   - ESLintのprojectServiceはtsconfigに含まれないファイルをパースできない
   - vitest.config.tsなどのルートファイル用に `tsconfig.node.json` が必要
   - `pnpm approve-builds` は対話的UIのため、`package.json` の `pnpm.onlyBuiltDependencies` で設定する
+---
+
+## 2026-03-03 - EffectResult 型定義 (タスク 1.2)
+- 実装した内容:
+  - `EffectResult<A, E>` discriminated union 型定義 (Initial, Pending, Success, Failure, Refreshing)
+  - コンストラクタ関数 (`initial`, `pending`, `success`, `failure`, `refreshing`) - `Data.struct` で構造的等値性
+  - 型ガード関数 (`isInitial`, `isPending`, `isSuccess`, `isFailure`, `isRefreshing`)
+  - exhaustive match ヘルパー (`matchEffectResult`)
+  - ユーティリティ関数 (`hasValue`, `getValue`)
+  - 31テスト (構造的等値性、型ガード、exhaustive match、hasValue、getValue)
+- 変更したファイル:
+  - packages/core/src/EffectResult.ts (新規)
+  - packages/core/src/index.ts (re-export追加)
+  - packages/core/tests/EffectResult.test.ts (新規)
+  - packages/core/tests/index.test.ts (修正: dynamic import → static import)
+- カバレッジ: 0% → 100% (EffectResult.ts)
+- **今後のイテレーションへの学び:**
+  - `luma-ts/no-explicit-return-is`: 型ガードの `result is T` を明示しない。TypeScript 5.5+ の推論に任せる
+  - `luma-ts/require-satisfies-in-tls`: テンプレートリテラル内の式に `satisfies string` 等が必要
+  - `Data.struct` はシンプルなオブジェクトに構造的等値性を付与。`Data.TaggedEnum` はジェネリック版では `$is`/`$match` が使えないため、手動定義の方が柔軟
+  - Effect.ts の動的 import はvitest のタイムアウト (5s) を超えうる。static import を使用すべき
 ---

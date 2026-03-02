@@ -28,7 +28,7 @@
 
 ### 1.2 EffectResult 型定義
 
-- [ ] `EffectResult<A, E>` discriminated union
+- [x] `EffectResult<A, E>` discriminated union
   ```typescript
   type EffectResult<A, E> =
     | { readonly _tag: "Initial" }
@@ -37,8 +37,8 @@
     | { readonly _tag: "Failure"; readonly cause: Cause<E> }
     | { readonly _tag: "Refreshing"; readonly value: A; readonly promise: Promise<void> }
   ```
-- [ ] exhaustive matchヘルパー
-- [ ] `Schema.TaggedClass` または `Data.TaggedClass` での定義検討
+- [x] exhaustive matchヘルパー
+- [x] `Schema.TaggedClass` または `Data.TaggedClass` での定義検討
 
 **テスト計画**:
 - 各状態の生成と型ガード関数のテスト
