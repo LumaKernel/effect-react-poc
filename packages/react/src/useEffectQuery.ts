@@ -1,8 +1,22 @@
 import { useMemo, useRef, useSyncExternalStore } from "react";
-import type { Effect } from "effect";
+import type { Effect, Schedule } from "effect";
 import type { EffectResult } from "@effect-react/core";
 import { createEffectObserver } from "@effect-react/core";
 import { useEffectStore } from "./EffectProvider.js";
+
+/**
+ * Options for `useEffectQuery`.
+ *
+ * When adding a new option:
+ * - Update tests in `packages/react/tests/useEffectQuery.test.tsx`
+ */
+export interface UseEffectQueryOptions<E> {
+  /**
+   * A Schedule policy for retrying the effect on failure.
+   * Uses `Effect.retry(effect, schedule)` internally via EffectStore.
+   */
+  readonly schedule?: Schedule.Schedule<unknown, E>;
+}
 
 /**
  * React hook that executes an Effect and subscribes to its result.
@@ -12,6 +26,7 @@ import { useEffectStore } from "./EffectProvider.js";
  * - Lazily triggers the Effect on first render (via EffectObserver)
  * - Re-executes when `key` changes
  * - Shares cache across components using the same key (via EffectStore)
+ * - Optionally accepts a schedule for retry policy
  *
  * When modifying this hook:
  * - Update tests in `packages/react/tests/useEffectQuery.test.tsx`
@@ -19,11 +34,13 @@ import { useEffectStore } from "./EffectProvider.js";
  *
  * @param key - Unique cache key for the query
  * @param effect - The Effect to execute
+ * @param options - Optional configuration including retry schedule
  * @returns The current EffectResult state
  */
 export const useEffectQuery = <A, E>(
   key: string,
   effect: Effect.Effect<A, E>,
+  options?: UseEffectQueryOptions<E>,
 ): EffectResult<A, E> => {
   const store = useEffectStore();
 
@@ -32,13 +49,22 @@ export const useEffectQuery = <A, E>(
   const effectRef = useRef(effect);
   effectRef.current = effect;
 
+  // Keep a stable reference to the schedule
+  const scheduleRef = useRef(options?.schedule);
+  scheduleRef.current = options?.schedule;
+
   // Create the observer, memoized by store + key.
   // When key changes, a new observer is created and the old one is unsubscribed
   // (via useSyncExternalStore's cleanup).
-  const observer = useMemo(
-    () => createEffectObserver<A, E>(store, key, effectRef.current),
-    [store, key],
-  );
+  const observer = useMemo(() => {
+    const schedule = scheduleRef.current;
+    return createEffectObserver<A, E>(
+      store,
+      key,
+      effectRef.current,
+      schedule ? { schedule } : undefined,
+    );
+  }, [store, key]);
 
   return useSyncExternalStore(observer.subscribe, observer.getSnapshot);
 };

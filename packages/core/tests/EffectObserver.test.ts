@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { Effect, ManagedRuntime, Layer } from "effect";
+import { Effect, ManagedRuntime, Layer, Schedule } from "effect";
 import { createEffectStore } from "../src/EffectStore.js";
 import { createEffectObserver } from "../src/EffectObserver.js";
 import { initial, success } from "../src/EffectResult.js";
@@ -235,6 +235,63 @@ describe("EffectObserver", () => {
       const unsub = observer.subscribe(() => {});
       unsub();
       unsub(); // should not throw
+
+      await runtime.dispose();
+    });
+  });
+
+  describe("schedule option", () => {
+    it("passes schedule to store.run for retry", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      const effect = Effect.gen(function* () {
+        callCount++;
+        if (callCount < 3) {
+          return yield* Effect.fail("not yet");
+        }
+        return "done";
+      });
+
+      const observer = createEffectObserver(store, "key", effect, {
+        schedule: Schedule.recurs(5),
+      });
+
+      observer.subscribe(() => {});
+
+      await vi.waitFor(() => {
+        expect(observer.getSnapshot()).toEqual(success("done"));
+      });
+
+      expect(callCount).toBe(3);
+      await runtime.dispose();
+    });
+
+    it("retry state is accessible via store after observer triggers run", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      const effect = Effect.gen(function* () {
+        callCount++;
+        if (callCount < 3) {
+          return yield* Effect.fail("error");
+        }
+        return "ok";
+      });
+
+      const observer = createEffectObserver(store, "key", effect, {
+        schedule: Schedule.recurs(5),
+      });
+
+      observer.subscribe(() => {});
+
+      await vi.waitFor(() => {
+        expect(observer.getSnapshot()).toEqual(success("ok"));
+      });
+
+      const retryState = store.getRetryState("key");
+      expect(retryState.retrying).toBe(false);
+      expect(retryState.attempt).toBeGreaterThanOrEqual(2);
 
       await runtime.dispose();
     });

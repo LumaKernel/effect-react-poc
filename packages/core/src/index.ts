@@ -31,9 +31,13 @@ export type {
   EffectStore,
   EffectStoreConfig,
   QueryFilter,
+  RetryState,
+  RunOptions,
   StoreRuntime,
 } from "./EffectStore.js";
 
 export { createEffectStore } from "./EffectStore.js";
+
+export type { EffectObserverOptions } from "./EffectObserver.js";
 
 export { createEffectObserver } from "./EffectObserver.js";

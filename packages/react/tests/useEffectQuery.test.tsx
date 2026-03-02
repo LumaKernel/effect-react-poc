@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from "vitest";
 import { renderHook, act, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StrictMode } from "react";
-import { Layer, Effect } from "effect";
+import { Layer, Effect, Schedule } from "effect";
 import { isInitial, isPending, isSuccess, isFailure } from "@effect-react/core";
 import type { EffectResult } from "@effect-react/core";
 import { EffectProvider } from "../src/EffectProvider.js";
@@ -207,6 +207,62 @@ describe("useEffectQuery", () => {
       if (result.current._tag === "Success") {
         expect(result.current.value).toBe("strict-value");
       }
+    });
+  });
+
+  describe("schedule option", () => {
+    it("retries and shows Success after eventual success", async () => {
+      let callCount = 0;
+
+      const effect = Effect.gen(function* () {
+        callCount++;
+        if (callCount < 3) {
+          return yield* Effect.fail("not yet");
+        }
+        return "retried-success";
+      });
+
+      const { result, rerender } = renderHook(
+        () =>
+          useEffectQuery("retry-test", effect, {
+            schedule: Schedule.recurs(5),
+          }),
+        { wrapper },
+      );
+
+      await waitForProvider(rerender);
+
+      await vi.waitFor(() => {
+        rerender();
+        expect(isSuccess(result.current)).toBe(true);
+      });
+
+      if (result.current._tag === "Success") {
+        expect(result.current.value).toBe("retried-success");
+      }
+
+      expect(callCount).toBe(3);
+    });
+
+    it("shows Failure after exhausting retries", async () => {
+      const effect = Effect.fail("permanent-error" as const);
+
+      const { result, rerender } = renderHook(
+        () =>
+          useEffectQuery("retry-exhaust", effect, {
+            schedule: Schedule.recurs(2),
+          }),
+        { wrapper },
+      );
+
+      await waitForProvider(rerender);
+
+      await vi.waitFor(() => {
+        rerender();
+        expect(isFailure(result.current)).toBe(true);
+      });
+
+      expect(result.current._tag).toBe("Failure");
     });
   });
 

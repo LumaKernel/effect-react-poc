@@ -9,6 +9,8 @@ export {
   useEffectStore,
 } from "./EffectProvider.js";
 
+export type { UseEffectQueryOptions } from "./useEffectQuery.js";
+
 export { useEffectQuery } from "./useEffectQuery.js";
 
 export { EffectError, useEffectSuspense } from "./useEffectSuspense.js";

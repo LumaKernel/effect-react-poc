@@ -1,8 +1,22 @@
-import type { Effect } from "effect";
+import type { Effect, Schedule } from "effect";
 import type { EffectResult } from "./EffectResult.js";
 import { isInitial } from "./EffectResult.js";
-import type { EffectStore } from "./EffectStore.js";
+import type { EffectStore, RunOptions } from "./EffectStore.js";
 import type { Subscribable } from "./Subscribable.js";
+
+/**
+ * Options for `createEffectObserver`.
+ *
+ * When adding a new option:
+ * - Update tests in `packages/core/tests/EffectObserver.test.ts`
+ */
+export interface EffectObserverOptions<E> {
+  /**
+   * A Schedule policy for retrying the effect on failure.
+   * Passed through to `store.run(key, effect, { schedule })`.
+   */
+  readonly schedule?: Schedule.Schedule<unknown, E>;
+}
 
 /**
  * EffectObserver watches a single EffectStore entry with lazy acquisition.
@@ -20,8 +34,13 @@ export const createEffectObserver = <A, E>(
   store: EffectStore,
   key: string,
   effect: Effect.Effect<A, E>,
+  options?: EffectObserverOptions<E>,
 ): Subscribable<EffectResult<A, E>> => {
   let subscriberCount = 0;
+
+  const runOptions: RunOptions<E> | undefined = options?.schedule
+    ? { schedule: options.schedule }
+    : undefined;
 
   const subscribe = (callback: () => void): (() => void) => {
     subscriberCount++;
@@ -32,7 +51,7 @@ export const createEffectObserver = <A, E>(
 
     // Lazy acquisition: run the effect on first subscribe if no data cached
     if (subscriberCount === 1 && isInitial(store.getSnapshot(key))) {
-      store.run(key, effect);
+      store.run(key, effect, runOptions);
     }
 
     let unsubscribed = false;

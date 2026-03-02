@@ -1,5 +1,5 @@
 import type { Scope } from "effect";
-import { Effect, Exit, Fiber } from "effect";
+import { Effect, Exit, Fiber, Schedule } from "effect";
 import type { EffectResult } from "./EffectResult.js";
 import {
   failure,
@@ -62,15 +62,49 @@ const defaultEffectStoreConfig: EffectStoreConfig = {
 };
 
 /**
+ * Options for `EffectStore.run`.
+ *
+ * When adding a new option:
+ * - Update `runEffect` implementation in `createEffectStore`
+ * - Update tests in `packages/core/tests/EffectStore.test.ts`
+ */
+export interface RunOptions<E> {
+  /**
+   * A Schedule policy for retrying the effect on failure.
+   * Uses `Effect.retry(effect, schedule)` internally.
+   */
+  readonly schedule?: Schedule.Schedule<unknown, E>;
+}
+
+/**
+ * Retry state metadata for a cache entry.
+ * Tracks the current retry attempt count.
+ *
+ * When modifying:
+ * - Update `createEffectStore` retry logic
+ * - Update tests in `packages/core/tests/EffectStore.test.ts`
+ */
+export interface RetryState {
+  /** Current retry attempt number (0 = initial attempt, 1 = first retry, etc.) */
+  readonly attempt: number;
+  /** Whether a retry is currently in progress */
+  readonly retrying: boolean;
+}
+
+const initialRetryState: RetryState = { attempt: 0, retrying: false };
+
+/**
  * Internal entry tracking the state and fiber for a single cache key.
  * Type-erased internally; typed access is via the public API.
  */
 interface StoreEntry {
   readonly subscribable: MutableSubscribable<EffectResult<unknown, unknown>>;
+  readonly retrySubscribable: MutableSubscribable<RetryState>;
   fiber: Fiber.RuntimeFiber<unknown, unknown> | null;
   subscriberCount: number;
   gcTimer: ReturnType<typeof setTimeout> | null;
   effect: Effect.Effect<unknown, unknown> | null;
+  schedule: Schedule.Schedule<unknown> | null;
   /** Timestamp (Date.now()) when the entry last settled to Success or Failure. null if never settled. */
   settledAt: number | null;
 }
@@ -102,8 +136,13 @@ export interface EffectStore {
    * Run an effect and cache its result under the given key.
    * If an effect is already running for this key, the previous fiber is interrupted.
    * If the entry already has a successful value, transitions through Refreshing state.
+   * Optionally accepts a schedule for retry policy.
    */
-  readonly run: <A, E>(key: string, effect: Effect.Effect<A, E>) => void;
+  readonly run: <A, E>(
+    key: string,
+    effect: Effect.Effect<A, E>,
+    options?: RunOptions<E>,
+  ) => void;
 
   /**
    * Re-run the last effect for the given key.
@@ -149,6 +188,17 @@ export interface EffectStore {
    * Get the current snapshot for a key.
    */
   readonly getSnapshot: <A, E>(key: string) => EffectResult<A, E>;
+
+  /**
+   * Get a Subscribable view of the retry state for a given key.
+   * Provides the current retry attempt count and whether a retry is in progress.
+   */
+  readonly getRetrySubscribable: (key: string) => Subscribable<RetryState>;
+
+  /**
+   * Get the current retry state snapshot for a given key.
+   */
+  readonly getRetryState: (key: string) => RetryState;
 
   /**
    * Notify the store that the window has regained focus.
@@ -224,10 +274,12 @@ export const createEffectStore = (
     }
     const entry: StoreEntry = {
       subscribable: createSubscribable<EffectResult<unknown, unknown>>(initial),
+      retrySubscribable: createSubscribable<RetryState>(initialRetryState),
       fiber: null,
       subscriberCount: 0,
       gcTimer: null,
       effect: null,
+      schedule: null,
       settledAt: null,
     };
     entries.set(key, entry);
@@ -259,7 +311,9 @@ export const createEffectStore = (
       entry.fiber = null;
     }
     entry.subscribable.set(initial);
+    entry.retrySubscribable.set(initialRetryState);
     entry.effect = null;
+    entry.schedule = null;
     entry.settledAt = null;
     entries.delete(key);
   };
@@ -271,7 +325,9 @@ export const createEffectStore = (
       entry.fiber = null;
     }
     entry.subscribable.set(initial);
+    entry.retrySubscribable.set(initialRetryState);
     entry.effect = null;
+    entry.schedule = null;
     entry.settledAt = null;
     // Unlike cleanupEntry, we don't delete the entry from the map
     // so that subscribers are notified of the state change.
@@ -291,6 +347,7 @@ export const createEffectStore = (
   const runEffect = (
     key: string,
     effect: Effect.Effect<unknown, unknown>,
+    schedule: Schedule.Schedule<unknown> | null,
   ): void => {
     if (disposed) {
       return;
@@ -298,9 +355,13 @@ export const createEffectStore = (
 
     const entry = getOrCreateEntry(key);
     entry.effect = effect;
+    entry.schedule = schedule;
 
     // Interrupt any existing fiber for this key
     interruptFiber(entry);
+
+    // Reset retry state
+    entry.retrySubscribable.set(initialRetryState);
 
     // Determine the transitional state
     const currentResult = entry.subscribable.getSnapshot();
@@ -313,8 +374,31 @@ export const createEffectStore = (
       entry.subscribable.set(pending);
     }
 
+    // Wrap effect with retry schedule if provided
+    const effectToRun =
+      schedule !== null
+        ? Effect.retry(
+            effect,
+            Schedule.tapOutput(schedule, () =>
+              Effect.sync(() => {
+                // On each retry attempt (when schedule decides to continue),
+                // update the retry state
+                const currentEntry = entries.get(key);
+                if (currentEntry) {
+                  const prevState =
+                    currentEntry.retrySubscribable.getSnapshot();
+                  currentEntry.retrySubscribable.set({
+                    attempt: prevState.attempt + 1,
+                    retrying: true,
+                  });
+                }
+              }),
+            ),
+          )
+        : effect;
+
     // Fork the effect
-    const fiber = runtime.runFork(effect);
+    const fiber = runtime.runFork(effectToRun);
     entry.fiber = fiber;
 
     // Observe the fiber result in a separate fiber
@@ -330,10 +414,18 @@ export const createEffectStore = (
       Exit.match(exit, {
         onFailure: (cause) => {
           currentEntry.settledAt = getNow();
+          currentEntry.retrySubscribable.set({
+            attempt: currentEntry.retrySubscribable.getSnapshot().attempt,
+            retrying: false,
+          });
           currentEntry.subscribable.set(failure(cause));
         },
         onSuccess: (value) => {
           currentEntry.settledAt = getNow();
+          currentEntry.retrySubscribable.set({
+            attempt: currentEntry.retrySubscribable.getSnapshot().attempt,
+            retrying: false,
+          });
           currentEntry.subscribable.set(success(value));
         },
       });
@@ -354,8 +446,16 @@ export const createEffectStore = (
       };
     },
 
-    run: <A, E>(key: string, effect: Effect.Effect<A, E>): void => {
-      runEffect(key, effect);
+    run: <A, E>(
+      key: string,
+      effect: Effect.Effect<A, E>,
+      options?: RunOptions<E>,
+    ): void => {
+      // Type-erase the schedule: internally the store works with unknown types.
+      // This is safe because the schedule is always paired with its matching effect.
+      const schedule =
+        (options?.schedule as Schedule.Schedule<unknown> | undefined) ?? null;
+      runEffect(key, effect, schedule);
     },
 
     invalidate: (key: string): void => {
@@ -363,7 +463,7 @@ export const createEffectStore = (
       if (!entry?.effect) {
         return;
       }
-      runEffect(key, entry.effect);
+      runEffect(key, entry.effect, entry.schedule);
     },
 
     invalidateQueries: (filter: QueryFilter): void => {
@@ -373,7 +473,7 @@ export const createEffectStore = (
         if (matchesFilter(filter, key)) {
           const entry = entries.get(key);
           if (entry?.effect) {
-            runEffect(key, entry.effect);
+            runEffect(key, entry.effect, entry.schedule);
           }
         }
       }
@@ -441,6 +541,22 @@ export const createEffectStore = (
       return entry.subscribable.getSnapshot() as EffectResult<A, E>;
     },
 
+    getRetrySubscribable: (key: string): Subscribable<RetryState> => {
+      const entry = getOrCreateEntry(key);
+      return {
+        subscribe: entry.retrySubscribable.subscribe,
+        getSnapshot: entry.retrySubscribable.getSnapshot,
+      };
+    },
+
+    getRetryState: (key: string): RetryState => {
+      const entry = entries.get(key);
+      if (!entry) {
+        return initialRetryState;
+      }
+      return entry.retrySubscribable.getSnapshot();
+    },
+
     notifyFocus: (): void => {
       if (!resolvedConfig.refetchOnWindowFocus) {
         return;
@@ -450,7 +566,7 @@ export const createEffectStore = (
         const entry = entries.get(key);
         if (entry && entry.subscriberCount > 0 && entry.effect) {
           if (store.isStale(key)) {
-            runEffect(key, entry.effect);
+            runEffect(key, entry.effect, entry.schedule);
           }
         }
       }

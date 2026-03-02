@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { Cause, Effect, ManagedRuntime, Layer } from "effect";
+import { Cause, Effect, ManagedRuntime, Layer, Schedule } from "effect";
 import { createEffectStore } from "../src/EffectStore.js";
-import type { EffectStoreConfig } from "../src/EffectStore.js";
+import type { EffectStoreConfig, RetryState } from "../src/EffectStore.js";
 import { initial, pending, success, refreshing } from "../src/EffectResult.js";
 
 /**
@@ -940,6 +940,299 @@ describe("EffectStore", () => {
 
       expect(callCount).toBe(1);
       expect(store.getSnapshot("key")).toEqual(success(1));
+
+      await runtime.dispose();
+    });
+  });
+
+  describe("retry with schedule", () => {
+    it("retries and eventually succeeds", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      const effect = Effect.sync(() => {
+        callCount++;
+        if (callCount < 3) {
+          throw new Error("not yet");
+        }
+        return "success";
+      }).pipe(Effect.catchAllDefect((defect) => Effect.fail(defect)));
+
+      store.run("key", effect, {
+        schedule: Schedule.recurs(5),
+      });
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success("success"));
+      });
+
+      expect(callCount).toBe(3);
+
+      await runtime.dispose();
+    });
+
+    it("fails after exhausting retries with Schedule.recurs", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      const effect = Effect.gen(function* () {
+        callCount++;
+        return yield* Effect.fail("error");
+      });
+
+      store.run("key", effect, {
+        schedule: Schedule.recurs(2),
+      });
+
+      await vi.waitFor(() => {
+        const result = store.getSnapshot("key");
+        expect(result._tag).toBe("Failure");
+      });
+
+      // 1 initial attempt + 2 retries = 3 calls
+      expect(callCount).toBe(3);
+
+      await runtime.dispose();
+    });
+
+    it("tracks retry state with attempt count", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+      const retryStates: RetryState[] = [];
+
+      const effect = Effect.gen(function* () {
+        callCount++;
+        return yield* Effect.fail("error");
+      });
+
+      // Subscribe to retry state changes
+      store.getRetrySubscribable("key").subscribe(() => {
+        retryStates.push(store.getRetryState("key"));
+      });
+
+      store.run("key", effect, {
+        schedule: Schedule.recurs(2),
+      });
+
+      await vi.waitFor(() => {
+        const result = store.getSnapshot("key");
+        expect(result._tag).toBe("Failure");
+      });
+
+      // 1 initial attempt + 2 retries = 3 total calls
+      expect(callCount).toBe(3);
+
+      // Verify all retry states (including reset and final)
+      // States: [reset {0,false}] → [retry {1,true}] → [retry {2,true}] → ... → [final {N,false}]
+      const retryingStates = retryStates.filter((s) => s.retrying);
+      // tapOutput fires for each schedule recurrence
+      expect(retryingStates.length).toBeGreaterThanOrEqual(2);
+
+      // Final state should not be retrying
+      const finalState = store.getRetryState("key");
+      expect(finalState.retrying).toBe(false);
+
+      await runtime.dispose();
+    });
+
+    it("resets retry state on successful retry", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      const effect = Effect.gen(function* () {
+        callCount++;
+        if (callCount < 3) {
+          return yield* Effect.fail("not yet");
+        }
+        return "done";
+      });
+
+      store.run("key", effect, {
+        schedule: Schedule.recurs(5),
+      });
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success("done"));
+      });
+
+      const retryState = store.getRetryState("key");
+      expect(retryState.retrying).toBe(false);
+      expect(retryState.attempt).toBe(2); // 2 retries before success
+
+      await runtime.dispose();
+    });
+
+    it("cancels retry on re-run of same key", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      const slowFailingEffect = Effect.gen(function* () {
+        callCount++;
+        yield* Effect.sleep("50 millis");
+        return yield* Effect.fail("error");
+      });
+
+      store.run("key", slowFailingEffect, {
+        schedule: Schedule.recurs(10),
+      });
+
+      // Wait for at least one attempt
+      await vi.waitFor(() => {
+        expect(callCount).toBeGreaterThanOrEqual(1);
+      });
+
+      const countBeforeRerun = callCount;
+
+      // Re-run with a different effect (interrupts previous)
+      store.run("key", Effect.succeed("new-value"));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success("new-value"));
+      });
+
+      // Should not have had many more calls after the re-run
+      expect(callCount).toBeLessThanOrEqual(countBeforeRerun + 1);
+
+      // Retry state should be reset
+      expect(store.getRetryState("key")).toEqual({
+        attempt: 0,
+        retrying: false,
+      });
+
+      await runtime.dispose();
+    });
+
+    it("cancels retry on dispose", async () => {
+      const { store, runtime } = createTestStore();
+
+      const effect = Effect.gen(function* () {
+        yield* Effect.sleep("10 millis");
+        return yield* Effect.fail("error");
+      });
+
+      store.run("key", effect, {
+        schedule: Schedule.recurs(100),
+      });
+
+      // Wait for at least one attempt
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")._tag).toBe("Pending");
+      });
+
+      await Effect.runPromise(store.dispose);
+      await runtime.dispose();
+    });
+
+    it("invalidate re-uses stored schedule", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      const effect = Effect.gen(function* () {
+        callCount++;
+        if (callCount % 3 !== 0) {
+          return yield* Effect.fail("not yet");
+        }
+        return `success-${String(callCount) satisfies string}`;
+      });
+
+      store.run("key", effect, {
+        schedule: Schedule.recurs(5),
+      });
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success("success-3"));
+      });
+
+      // Reset call count tracking
+      // callCount is now 3. Next success will be at 6.
+      store.invalidate("key");
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success("success-6"));
+      });
+
+      await runtime.dispose();
+    });
+
+    it("clearCache resets retry state", async () => {
+      const { store, runtime } = createTestStore();
+
+      const effect = Effect.gen(function* () {
+        yield* Effect.sleep("10 millis");
+        return yield* Effect.fail("error");
+      });
+
+      store.subscribe("key", () => {});
+      store.run("key", effect, {
+        schedule: Schedule.recurs(100),
+      });
+
+      // Wait for retrying to start
+      await vi.waitFor(() => {
+        const retryState = store.getRetryState("key");
+        expect(retryState.attempt).toBeGreaterThanOrEqual(1);
+      });
+
+      store.clearCache("key");
+
+      expect(store.getRetryState("key")).toEqual({
+        attempt: 0,
+        retrying: false,
+      });
+      expect(store.getSnapshot("key")).toEqual(initial);
+
+      await runtime.dispose();
+    });
+
+    it("run without schedule has initial retry state", async () => {
+      const { store, runtime } = createTestStore();
+
+      store.run("key", Effect.succeed(42));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success(42));
+      });
+
+      expect(store.getRetryState("key")).toEqual({
+        attempt: 0,
+        retrying: false,
+      });
+
+      await runtime.dispose();
+    });
+
+    it("getRetryState returns initial state for unknown key", () => {
+      const { store } = createTestStore();
+      expect(store.getRetryState("unknown")).toEqual({
+        attempt: 0,
+        retrying: false,
+      });
+    });
+
+    it("works with exponential backoff schedule", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      const effect = Effect.gen(function* () {
+        callCount++;
+        if (callCount < 3) {
+          return yield* Effect.fail("not yet");
+        }
+        return "done";
+      });
+
+      store.run("key", effect, {
+        schedule: Schedule.intersect(
+          Schedule.exponential("1 millis"),
+          Schedule.recurs(5),
+        ),
+      });
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success("done"));
+      });
+
+      expect(callCount).toBe(3);
 
       await runtime.dispose();
     });
