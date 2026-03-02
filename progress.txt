@@ -371,3 +371,23 @@
   - `resetEntry` (clearCache用) と `cleanupEntry` (GC用) を分離: resetEntry は entries.delete しない（subscriber への通知のため）、cleanupEntry は完全削除
   - staleTime のデフォルト 0 = "常に stale"。EffectObserver の isStale チェックは react 側の useEffectQuery で行うべき（EffectObserver 自体に組み込むと既存テスト・挙動が変わる）
 ---
+
+## 2026-03-03 - ウィンドウフォーカス自動再フェッチ (タスク 3.2 完了)
+- 実装した内容:
+  - `EffectStoreConfig` に `refetchOnWindowFocus: boolean` (default: false) を追加
+  - `EffectStore` に `notifyFocus()` メソッドを追加: subscriber がいる stale エントリのみ invalidate
+  - `EffectProvider` で `visibilitychange` + `focus` イベントを購読し `store.notifyFocus()` を呼出
+  - unmount 時にイベントリスナーを適切に解除
+  - 8テスト追加（core: 4テスト、react: 4テスト）、合計174テスト、カバレッジ100%維持
+- 変更したファイル:
+  - packages/core/src/EffectStore.ts (refetchOnWindowFocus config, notifyFocus メソッド追加)
+  - packages/core/tests/EffectStore.test.ts (notifyFocus テスト4件追加)
+  - packages/react/src/EffectProvider.tsx (visibilitychange + focus イベント購読)
+  - packages/react/tests/EffectProvider.test.tsx (フォーカス再フェッチテスト4件追加)
+- カバレッジ: 100% → 100% (変化なし)
+- **今後のイテレーションへの学び:**
+  - フォーカス再フェッチの設計: core 側は `notifyFocus()` メソッドのみ提供し、DOM イベント購読は React 側の責務とする（プラットフォーム非依存）
+  - `store.isStale(key)` を再利用して stale 判定を一箇所に集約。新機能追加時も既存メソッドの組み合わせで実現可能
+  - jsdom テストで `visibilityState` を変更するには `Object.defineProperty(document, "visibilityState", { value: "visible", writable: true, configurable: true })` が必要
+  - `window.addEventListener` のスパイテストでは `vi.spyOn` の `mockRestore()` を忘れずに
+---
