@@ -94,6 +94,21 @@ export interface RetryState {
 const initialRetryState: RetryState = { attempt: 0, retrying: false };
 
 /**
+ * Handle returned by `EffectStore.setOptimistic`.
+ * Calling `rollback()` restores the pre-optimistic value, but only if the
+ * entry has not been overwritten by another `setOptimistic`, `run`, or
+ * `clearCache` since the optimistic update was applied.
+ *
+ * When modifying:
+ * - Update `createEffectStore` setOptimistic implementation
+ * - Update tests in `packages/core/tests/EffectStore.test.ts`
+ */
+export interface OptimisticRollback {
+  /** Restore the previous value. No-op if the entry was overwritten since the optimistic update. */
+  readonly rollback: () => void;
+}
+
+/**
  * Internal entry tracking the state and fiber for a single cache key.
  * Type-erased internally; typed access is via the public API.
  */
@@ -107,6 +122,8 @@ interface StoreEntry {
   schedule: Schedule.Schedule<unknown> | null;
   /** Timestamp (Date.now()) when the entry last settled to Success or Failure. null if never settled. */
   settledAt: number | null;
+  /** Monotonically increasing version for optimistic update conflict detection. Incremented by setOptimistic, run, clearCache, resetEntry. */
+  version: number;
 }
 
 /**
@@ -201,6 +218,19 @@ export interface EffectStore {
   readonly getRetryState: (key: string) => RetryState;
 
   /**
+   * Set an optimistic value for a key, immediately transitioning to Success.
+   * Returns an `OptimisticRollback` handle whose `rollback()` restores the
+   * previous value — unless the entry has been overwritten by another
+   * `setOptimistic`, `run`, or `clearCache` since this call.
+   *
+   * Typical usage with mutations:
+   * 1. Call `setOptimistic(key, newValue)` before triggering the mutation
+   * 2. On mutation success: do nothing (value is already correct)
+   * 3. On mutation failure: call `rollback()` to restore the previous value
+   */
+  readonly setOptimistic: (key: string, value: unknown) => OptimisticRollback;
+
+  /**
    * Notify the store that the window has regained focus.
    * If `refetchOnWindowFocus` is enabled, invalidates all stale entries
    * that have active subscribers (subscriberCount > 0).
@@ -281,6 +311,7 @@ export const createEffectStore = (
       effect: null,
       schedule: null,
       settledAt: null,
+      version: 0,
     };
     entries.set(key, entry);
     return entry;
@@ -324,6 +355,7 @@ export const createEffectStore = (
       runtime.runFork(Fiber.interruptFork(entry.fiber));
       entry.fiber = null;
     }
+    entry.version++;
     entry.subscribable.set(initial);
     entry.retrySubscribable.set(initialRetryState);
     entry.effect = null;
@@ -356,6 +388,7 @@ export const createEffectStore = (
     const entry = getOrCreateEntry(key);
     entry.effect = effect;
     entry.schedule = schedule;
+    entry.version++;
 
     // Interrupt any existing fiber for this key
     interruptFiber(entry);
@@ -410,6 +443,8 @@ export const createEffectStore = (
         return;
       }
       currentEntry.fiber = null;
+
+      currentEntry.version++;
 
       Exit.match(exit, {
         onFailure: (cause) => {
@@ -555,6 +590,27 @@ export const createEffectStore = (
         return initialRetryState;
       }
       return entry.retrySubscribable.getSnapshot();
+    },
+
+    setOptimistic: (key: string, value: unknown): OptimisticRollback => {
+      const entry = getOrCreateEntry(key);
+      const previousResult = entry.subscribable.getSnapshot();
+      entry.version++;
+      const versionAtSet = entry.version;
+      entry.subscribable.set(success(value));
+
+      return {
+        rollback: (): void => {
+          // Only rollback if the entry still exists and has not been
+          // overwritten by another setOptimistic, run, or clearCache.
+          const currentEntry = entries.get(key);
+          if (!currentEntry || currentEntry.version !== versionAtSet) {
+            return;
+          }
+          currentEntry.version++;
+          currentEntry.subscribable.set(previousResult);
+        },
+      };
     },
 
     notifyFocus: (): void => {

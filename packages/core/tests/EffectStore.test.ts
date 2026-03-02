@@ -1286,4 +1286,171 @@ describe("EffectStore", () => {
       await runtime.dispose();
     });
   });
+
+  describe("setOptimistic", () => {
+    it("immediately sets the entry to Success with the given value", () => {
+      const { store } = createTestStore();
+      store.setOptimistic("key", "optimistic-value");
+      expect(store.getSnapshot("key")).toEqual(success("optimistic-value"));
+    });
+
+    it("returns a rollback handle that restores the previous value", async () => {
+      const { store, runtime } = createTestStore();
+      store.run("key", Effect.succeed("original"));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success("original"));
+      });
+
+      const handle = store.setOptimistic("key", "optimistic");
+      expect(store.getSnapshot("key")).toEqual(success("optimistic"));
+
+      handle.rollback();
+      expect(store.getSnapshot("key")).toEqual(success("original"));
+
+      await runtime.dispose();
+    });
+
+    it("rollback restores Initial if the entry had no previous value", () => {
+      const { store } = createTestStore();
+      const handle = store.setOptimistic("key", "optimistic");
+      expect(store.getSnapshot("key")).toEqual(success("optimistic"));
+
+      handle.rollback();
+      expect(store.getSnapshot("key")).toEqual(initial);
+    });
+
+    it("rollback is no-op if entry was overwritten by run()", async () => {
+      const { store, runtime } = createTestStore();
+      const handle = store.setOptimistic("key", "optimistic");
+      expect(store.getSnapshot("key")).toEqual(success("optimistic"));
+
+      // run() overwrites the optimistic update
+      store.run("key", Effect.succeed("from-run"));
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success("from-run"));
+      });
+
+      // rollback should be no-op since run() overwrote the entry
+      handle.rollback();
+      expect(store.getSnapshot("key")).toEqual(success("from-run"));
+
+      await runtime.dispose();
+    });
+
+    it("rollback is no-op if entry was overwritten by another setOptimistic()", () => {
+      const { store } = createTestStore();
+      const handle1 = store.setOptimistic("key", "opt-1");
+      const handle2 = store.setOptimistic("key", "opt-2");
+      expect(store.getSnapshot("key")).toEqual(success("opt-2"));
+
+      // handle1 rollback should be no-op (handle2 overwrote it)
+      handle1.rollback();
+      expect(store.getSnapshot("key")).toEqual(success("opt-2"));
+
+      // handle2 rollback should work (it's the latest)
+      handle2.rollback();
+      expect(store.getSnapshot("key")).toEqual(success("opt-1"));
+    });
+
+    it("rollback is no-op if entry was cleared by clearCache()", () => {
+      const { store } = createTestStore();
+      store.subscribe("key", () => {});
+      const handle = store.setOptimistic("key", "optimistic");
+      expect(store.getSnapshot("key")).toEqual(success("optimistic"));
+
+      store.clearCache("key");
+      expect(store.getSnapshot("key")).toEqual(initial);
+
+      // rollback should be no-op
+      handle.rollback();
+      expect(store.getSnapshot("key")).toEqual(initial);
+    });
+
+    it("notifies subscribers when optimistic value is set", () => {
+      const { store } = createTestStore();
+      const callback = vi.fn();
+      store.subscribe("key", callback);
+
+      store.setOptimistic("key", "optimistic");
+      expect(callback).toHaveBeenCalledTimes(1);
+    });
+
+    it("notifies subscribers on rollback", async () => {
+      const { store, runtime } = createTestStore();
+      store.run("key", Effect.succeed("original"));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success("original"));
+      });
+
+      const callback = vi.fn();
+      store.subscribe("key", callback);
+
+      const handle = store.setOptimistic("key", "optimistic");
+      expect(callback).toHaveBeenCalledTimes(1);
+
+      handle.rollback();
+      expect(callback).toHaveBeenCalledTimes(2);
+
+      await runtime.dispose();
+    });
+
+    it("works with optimistic update during Pending state", async () => {
+      const { store, runtime } = createTestStore();
+
+      // Start an async effect with externally-controlled resolution
+      const resolvers: Array<(v: string) => void> = [];
+      const effect = Effect.async<string>((cb) => {
+        resolvers.push((v: string) => {
+          cb(Effect.succeed(v));
+        });
+      });
+      store.run("key", effect);
+
+      // Wait for the async callback to be set up
+      await vi.waitFor(() => {
+        expect(resolvers).toHaveLength(1);
+      });
+      expect(store.getSnapshot("key")).toEqual(pending);
+
+      // Set optimistic value while effect is pending
+      const handle = store.setOptimistic("key", "optimistic");
+      expect(store.getSnapshot("key")).toEqual(success("optimistic"));
+
+      // Resolve the original effect - the observer fiber will update
+      // the entry because its fiber reference hasn't changed
+      const resolver = resolvers.at(0);
+      expect(resolver).toBeDefined();
+      resolver?.("resolved");
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success("resolved"));
+      });
+
+      // rollback should be no-op since the effect resolved (version changed)
+      handle.rollback();
+      expect(store.getSnapshot("key")).toEqual(success("resolved"));
+
+      await runtime.dispose();
+    });
+
+    it("double rollback is idempotent", async () => {
+      const { store, runtime } = createTestStore();
+      store.run("key", Effect.succeed("original"));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success("original"));
+      });
+
+      const handle = store.setOptimistic("key", "optimistic");
+      handle.rollback();
+      expect(store.getSnapshot("key")).toEqual(success("original"));
+
+      // Second rollback is no-op (version already changed)
+      handle.rollback();
+      expect(store.getSnapshot("key")).toEqual(success("original"));
+
+      await runtime.dispose();
+    });
+  });
 });

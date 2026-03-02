@@ -6,9 +6,16 @@ import { renderHook, act } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StrictMode } from "react";
 import { Layer, Effect } from "effect";
-import { isInitial, isPending, isSuccess, isFailure } from "@effect-react/core";
-import { EffectProvider } from "../src/EffectProvider.js";
+import {
+  isInitial,
+  isPending,
+  isSuccess,
+  isFailure,
+  success,
+} from "@effect-react/core";
+import { EffectProvider, useEffectStore } from "../src/EffectProvider.js";
 import { useEffectMutation } from "../src/useEffectMutation.js";
+import { useEffectQuery } from "../src/useEffectQuery.js";
 
 const wrapper = ({ children }: { readonly children: ReactNode }) => (
   <EffectProvider layer={Layer.empty}>{children}</EffectProvider>
@@ -399,6 +406,258 @@ describe("useEffectMutation", () => {
       if (result.current.result._tag === "Success") {
         expect(result.current.result.value).toBe("strict-value");
       }
+    });
+  });
+
+  describe("optimistic updates (mutation callbacks)", () => {
+    it("calls onMutate before the effect runs", async () => {
+      const onMutate = vi.fn();
+
+      const { result, rerender } = renderHook(
+        () =>
+          useEffectMutation((_input: undefined) => Effect.succeed("done"), {
+            onMutate,
+          }),
+        { wrapper },
+      );
+
+      await waitForProvider(rerender);
+
+      act(() => {
+        result.current.mutate(undefined);
+      });
+
+      expect(onMutate).toHaveBeenCalledTimes(1);
+    });
+
+    it("calls onSuccess after successful mutation", async () => {
+      const onSuccess = vi.fn();
+
+      const { result, rerender } = renderHook(
+        () =>
+          useEffectMutation((input: number) => Effect.succeed(input * 2), {
+            onSuccess,
+          }),
+        { wrapper },
+      );
+
+      await waitForProvider(rerender);
+
+      act(() => {
+        result.current.mutate(21);
+      });
+
+      await vi.waitFor(() => {
+        rerender();
+        expect(isSuccess(result.current.result)).toBe(true);
+      });
+
+      expect(onSuccess).toHaveBeenCalledWith(42, 21);
+    });
+
+    it("calls onError after failed mutation", async () => {
+      const onError = vi.fn();
+
+      const { result, rerender } = renderHook(
+        () =>
+          useEffectMutation(
+            (_input: undefined) => Effect.fail("oops" as const),
+            { onError },
+          ),
+        { wrapper },
+      );
+
+      await waitForProvider(rerender);
+
+      act(() => {
+        result.current.mutate(undefined);
+      });
+
+      await vi.waitFor(() => {
+        rerender();
+        expect(isFailure(result.current.result)).toBe(true);
+      });
+
+      expect(onError).toHaveBeenCalledTimes(1);
+    });
+
+    it("optimistic update → success → value maintained in query cache", async () => {
+      const queryKey = "opt-success-test";
+
+      const { result, rerender } = renderHook(
+        () => {
+          const store = useEffectStore();
+          const query = useEffectQuery(queryKey, Effect.succeed("original"));
+          const mutation = useEffectMutation(
+            (_input: undefined) => Effect.succeed("from-server"),
+            {
+              onMutate: () => store.setOptimistic(queryKey, "optimistic"),
+            },
+          );
+          return { query, mutation, store };
+        },
+        { wrapper },
+      );
+
+      // Wait for initial query to load
+      await vi.waitFor(() => {
+        rerender();
+        expect(result.current.query).toEqual(success("original"));
+      });
+
+      // Trigger mutation with optimistic update
+      act(() => {
+        result.current.mutation.mutate(undefined);
+      });
+
+      // Query cache should immediately show optimistic value
+      expect(result.current.store.getSnapshot(queryKey)).toEqual(
+        success("optimistic"),
+      );
+
+      // After mutation completes, mutation state should be Success
+      await vi.waitFor(() => {
+        rerender();
+        expect(isSuccess(result.current.mutation.result)).toBe(true);
+      });
+    });
+
+    it("optimistic update → failure → automatic rollback", async () => {
+      const queryKey = "opt-rollback-test";
+
+      const { result, rerender } = renderHook(
+        () => {
+          const store = useEffectStore();
+          const query = useEffectQuery(queryKey, Effect.succeed("original"));
+          const mutation = useEffectMutation(
+            (_input: undefined) => Effect.fail("server-error" as const),
+            {
+              onMutate: () => store.setOptimistic(queryKey, "optimistic"),
+            },
+          );
+          return { query, mutation, store };
+        },
+        { wrapper },
+      );
+
+      // Wait for initial query to load
+      await vi.waitFor(() => {
+        rerender();
+        expect(result.current.query).toEqual(success("original"));
+      });
+
+      // Trigger mutation with optimistic update
+      act(() => {
+        result.current.mutation.mutate(undefined);
+      });
+
+      // Query cache should show optimistic value immediately
+      expect(result.current.store.getSnapshot(queryKey)).toEqual(
+        success("optimistic"),
+      );
+
+      // After mutation fails, query cache should roll back to original
+      await vi.waitFor(() => {
+        rerender();
+        expect(isFailure(result.current.mutation.result)).toBe(true);
+      });
+
+      expect(result.current.store.getSnapshot(queryKey)).toEqual(
+        success("original"),
+      );
+    });
+
+    it("no rollback when onMutate returns void", async () => {
+      const queryKey = "opt-void-test";
+
+      const { result, rerender } = renderHook(
+        () => {
+          const store = useEffectStore();
+          const query = useEffectQuery(queryKey, Effect.succeed("original"));
+          const mutation = useEffectMutation(
+            (_input: undefined) => Effect.fail("server-error" as const),
+            {
+              onMutate: () => {
+                // does not return OptimisticRollback
+                return undefined;
+              },
+            },
+          );
+          return { query, mutation, store };
+        },
+        { wrapper },
+      );
+
+      // Wait for initial query to load
+      await vi.waitFor(() => {
+        rerender();
+        expect(result.current.query).toEqual(success("original"));
+      });
+
+      // Trigger mutation (no optimistic update)
+      act(() => {
+        result.current.mutation.mutate(undefined);
+      });
+
+      // After mutation fails, query cache should still have original value
+      await vi.waitFor(() => {
+        rerender();
+        expect(isFailure(result.current.mutation.result)).toBe(true);
+      });
+
+      expect(result.current.store.getSnapshot(queryKey)).toEqual(
+        success("original"),
+      );
+    });
+
+    it("reset clears rollback state", async () => {
+      const queryKey = "opt-reset-test";
+
+      const { result, rerender } = renderHook(
+        () => {
+          const store = useEffectStore();
+          const query = useEffectQuery(queryKey, Effect.succeed("original"));
+          const mutation = useEffectMutation(
+            (_input: undefined) =>
+              Effect.async<string>(() => {
+                // never resolves
+              }),
+            {
+              onMutate: () => store.setOptimistic(queryKey, "optimistic"),
+            },
+          );
+          return { query, mutation, store };
+        },
+        { wrapper },
+      );
+
+      // Wait for initial query to load
+      await vi.waitFor(() => {
+        rerender();
+        expect(result.current.query).toEqual(success("original"));
+      });
+
+      // Trigger mutation with optimistic update
+      act(() => {
+        result.current.mutation.mutate(undefined);
+      });
+
+      expect(result.current.store.getSnapshot(queryKey)).toEqual(
+        success("optimistic"),
+      );
+
+      // Reset the mutation
+      act(() => {
+        result.current.mutation.reset();
+      });
+
+      rerender();
+      expect(isInitial(result.current.mutation.result)).toBe(true);
+
+      // Optimistic value should remain (reset doesn't auto-rollback)
+      expect(result.current.store.getSnapshot(queryKey)).toEqual(
+        success("optimistic"),
+      );
     });
   });
 });

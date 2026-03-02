@@ -30,6 +30,7 @@ export { createSubscribable } from "./Subscribable.js";
 export type {
   EffectStore,
   EffectStoreConfig,
+  OptimisticRollback,
   QueryFilter,
   RetryState,
   RunOptions,
