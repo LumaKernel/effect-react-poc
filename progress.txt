@@ -40,6 +40,26 @@
 - SSR: `getServerSnapshot` は全フックでモジュールレベル定数（`() => initial`）。`noopSubscribe` も同様
 - SSR: EffectProvider は `typeof window === "undefined"` で SSR 判定。SSR 時は null context で children をレンダー
 - SSR テスト: `@vitest-environment node` + `renderToString` で実 SSR パスを検証。jsdom テストとは別ファイル
+- CI: GitHub Actions `.github/workflows/ci.yml` で typecheck → lint → test (coverage) を実行。push/PR on main でトリガー
+
+## 2026-03-03 - CI セットアップ (タスク 6.1)
+- 実装した内容:
+  - `.github/workflows/ci.yml` 作成
+  - トリガー: push (main), pull_request (main)
+  - ステップ: pnpm install → typecheck → lint → test with coverage
+  - Node.js 22.x マトリクス
+  - pnpm キャッシュ設定 (`actions/setup-node@v4` の `cache: pnpm`)
+  - `pnpm/action-setup@v4` で `packageManager` フィールドからpnpmバージョン自動検出
+- 変更したファイル:
+  - .github/workflows/ci.yml (新規)
+  - tasks/06-ci-setup.md (6.1 完了マーク)
+- カバレッジ: 100% → 100% (変化なし)
+- CI結果: ✅ 全ステップ通過 (41s)
+- **今後のイテレーションへの学び:**
+  - `pnpm/action-setup@v4` は `package.json` の `packageManager` フィールドからバージョンを自動検出。明示的なバージョン指定は不要
+  - `actions/setup-node@v4` の `cache: pnpm` は pnpm store のキャッシュを自動管理
+  - `--frozen-lockfile` を使用して CI で lockfile 不整合を検出
+---
 
 ## 2026-03-03 - SSR対応・getServerSnapshot実装 (タスク 3.6 部分)
 - 実装した内容:
