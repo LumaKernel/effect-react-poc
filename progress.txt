@@ -41,6 +41,28 @@
 - SSR: EffectProvider は `typeof window === "undefined"` で SSR 判定。SSR 時は null context で children をレンダー
 - SSR テスト: `@vitest-environment node` + `renderToString` で実 SSR パスを検証。jsdom テストとは別ファイル
 - CI: GitHub Actions `.github/workflows/ci.yml` で typecheck → lint → test (coverage) を実行。push/PR on main でトリガー
+- SubscriptionRef カウンター: `useEffectRuntime<R, E>()` + `runtime.runFork` + `createSubscribable` + `useSyncExternalStore` パターン（フックの R 型制約を回避）
+
+## 2026-03-03 - counter example (タスク 4.2)
+- 実装した内容:
+  - examples/counter: SubscriptionRef を使ったリアクティブカウンター
+  - CounterService: Context.Tag + Layer.effect で SubscriptionRef<number> を管理
+  - useCounterValue カスタムフック: useEffectRuntime + Stream.runForEach + createSubscribable + useSyncExternalStore
+  - useCounterActions カスタムフック: useEffectRuntime + runtime.runFork で increment/decrement
+  - CounterDisplay: useCounterValue で値を購読（複数インスタンスが同じ SubscriptionRef を共有）
+  - CounterControls: useCounterActions で increment/decrement ボタン
+  - tsconfig.json に examples/counter のプロジェクト参照追加
+- 変更したファイル:
+  - examples/counter/ (新規: package.json, tsconfig.json, vite.config.ts, index.html, src/*.tsx, src/*.ts)
+  - tsconfig.json (examples/counter 参照追加)
+  - pnpm-lock.yaml (workspace依存追加)
+- カバレッジ: 100% → 100% (変化なし、examples はカバレッジ対象外)
+- **今後のイテレーションへの学び:**
+  - useEffectStream/useEffectMutation は Effect/Stream の R パラメータを型レベルで受け付けない（R = never）。サービスを使う Effect を渡す場合は useEffectRuntime<R, E>() で runtime を取得し、runtime.runFork で直接実行するカスタムフックが型安全
+  - SubscriptionRef.changes は subscribe 時点の現在値を含むため、初期値を別途取得する必要がない
+  - Counter のような状態管理は EffectStore（クエリキャッシュ）ではなく、runtime 直接操作 + createSubscribable が適切
+  - examples の品質基準: `pnpm typecheck` + `pnpm --filter <name> build` + `pnpm lint` が通ること
+---
 
 ## 2026-03-03 - hello-world example (タスク 4.1)
 - 実装した内容:
