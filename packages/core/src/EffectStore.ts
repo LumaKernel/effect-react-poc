@@ -98,13 +98,23 @@ export interface EffectStore {
 
 /**
  * Minimal runtime interface needed by EffectStore.
- * Compatible with ManagedRuntime and Runtime.
+ * Compatible with ManagedRuntime<R, E> (where E is the layer error).
+ *
+ * The fiber error type is `unknown` because:
+ * - ManagedRuntime<R, LayerE>.runFork<A, EffE> returns RuntimeFiber<A, EffE | LayerE>
+ * - The store internally erases types (stores Fiber<unknown, unknown>)
+ * - The store only uses Fiber.await and Fiber.interruptFork, both of which work with any error type
+ *
+ * When modifying this interface:
+ * - Update createEffectStore
+ * - Update EffectProvider's createStoreRuntimeDelegate
+ * - Update tests in packages/core/tests/EffectStore.test.ts
  */
 export interface StoreRuntime {
   readonly runFork: <A, E>(
     effect: Effect.Effect<A, E>,
     options?: { readonly scope?: Scope.Scope },
-  ) => Fiber.RuntimeFiber<A, E>;
+  ) => Fiber.RuntimeFiber<A, unknown>;
 }
 
 /**

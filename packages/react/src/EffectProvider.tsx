@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { Layer } from "effect";
 import { ManagedRuntime } from "effect";
+import type { EffectStore, EffectStoreConfig } from "@effect-react/core";
+import { createEffectStore } from "@effect-react/core";
 
 /**
  * Minimal interface for ManagedRuntime used by EffectProvider.
@@ -26,6 +28,8 @@ const EffectRuntimeContext = createContext<EffectManagedRuntime<
   any
 > | null>(null);
 
+const EffectStoreContext = createContext<EffectStore | null>(null);
+
 /**
  * Retrieve the ManagedRuntime from the nearest EffectProvider.
  * Throws if used outside of an EffectProvider.
@@ -46,6 +50,23 @@ export const useEffectRuntime = <R, E>(): EffectManagedRuntime<R, E> => {
 };
 
 /**
+ * Retrieve the EffectStore from the nearest EffectProvider.
+ * Throws if used outside of an EffectProvider.
+ *
+ * This is an internal hook used by useEffectQuery and other hooks.
+ */
+export const useEffectStore = (): EffectStore => {
+  const store = useContext(EffectStoreContext);
+  if (store === null) {
+    throw new Error(
+      "useEffectStore must be used within an EffectProvider. " +
+        "Wrap your component tree with <EffectProvider layer={...}>.",
+    );
+  }
+  return store;
+};
+
+/**
  * Props for EffectProvider.
  *
  * When adding a new prop:
@@ -54,39 +75,54 @@ export const useEffectRuntime = <R, E>(): EffectManagedRuntime<R, E> => {
  */
 export interface EffectProviderProps<R, E> {
   readonly layer: Layer.Layer<R, E>;
+  readonly storeConfig?: Partial<EffectStoreConfig>;
   readonly children: ReactNode;
 }
 
 /**
- * Provides a ManagedRuntime to the React component tree.
+ * Internal state holding both the runtime and its associated store.
+ * When the runtime changes, the store is recreated.
+ */
+interface ProviderState<R, E> {
+  readonly runtime: EffectManagedRuntime<R, E>;
+  readonly store: EffectStore;
+}
+
+/**
+ * Provides a ManagedRuntime and EffectStore to the React component tree.
  *
  * - Creates a ManagedRuntime from the given Layer
- * - Disposes the runtime on unmount or when the layer reference changes
+ * - Creates an EffectStore backed by the runtime
+ * - Disposes the runtime and store on unmount or when the layer reference changes
  * - Children can access the runtime via useEffectRuntime()
+ * - Children can access the store via useEffectStore()
  */
 export const EffectProvider = <R, E>({
   layer,
+  storeConfig,
   children,
 }: EffectProviderProps<R, E>): ReactNode => {
-  const [runtime, setRuntime] = useState<EffectManagedRuntime<R, E> | null>(
-    null,
-  );
+  const [state, setState] = useState<ProviderState<R, E> | null>(null);
   useEffect(() => {
     const rt = ManagedRuntime.make(layer);
-    setRuntime(rt);
+    const store = createEffectStore(rt, storeConfig);
+    setState({ runtime: rt, store });
 
     return () => {
+      rt.runFork(store.dispose);
       void rt.dispose();
     };
-  }, [layer]);
+  }, [layer, storeConfig]);
 
-  if (runtime === null) {
+  if (state === null) {
     return null;
   }
 
   return (
-    <EffectRuntimeContext.Provider value={runtime}>
-      {children}
+    <EffectRuntimeContext.Provider value={state.runtime}>
+      <EffectStoreContext.Provider value={state.store}>
+        {children}
+      </EffectStoreContext.Provider>
     </EffectRuntimeContext.Provider>
   );
 };

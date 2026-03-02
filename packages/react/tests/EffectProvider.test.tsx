@@ -6,7 +6,11 @@ import { renderHook, render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { Layer, Effect } from "effect";
 import type { EffectManagedRuntime } from "../src/EffectProvider.js";
-import { EffectProvider, useEffectRuntime } from "../src/EffectProvider.js";
+import {
+  EffectProvider,
+  useEffectRuntime,
+  useEffectStore,
+} from "../src/EffectProvider.js";
 
 describe("EffectProvider", () => {
   describe("useEffectRuntime", () => {
@@ -43,6 +47,18 @@ describe("EffectProvider", () => {
       expect(typeof result.current.runSync).toBe("function");
       expect(typeof result.current.runPromise).toBe("function");
       expect(typeof result.current.dispose).toBe("function");
+    });
+  });
+
+  describe("useEffectStore", () => {
+    it("throws when used outside of EffectProvider", () => {
+      const consoleSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      expect(() => renderHook(() => useEffectStore())).toThrow(
+        "useEffectStore must be used within an EffectProvider",
+      );
+      consoleSpy.mockRestore();
     });
   });
 
