@@ -16,3 +16,7 @@ export { EffectError, useEffectSuspense } from "./useEffectSuspense.js";
 export type { MutationState } from "./useEffectMutation.js";
 
 export { useEffectMutation } from "./useEffectMutation.js";
+
+export type { StreamResult } from "./useEffectStream.js";
+
+export { useEffectStream } from "./useEffectStream.js";

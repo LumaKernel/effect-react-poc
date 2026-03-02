@@ -22,6 +22,8 @@
 - React `Component` サブクラスの `render()` も `override` 必須（TypeScript strict + noImplicitOverride）
 - useEffectMutation: runtime 直接利用 + `createSubscribable` でコンポーネントローカル管理。EffectStore 不使用
 - mutation の observer fiber は直接キャンセル不要。mutation fiber interrupt → Fiber.await が Interrupt exit → ガードで無視
+- useEffectStream: `Stream.runForEach` + `Effect.catchAll` でストリーム消費。interrupt は自然伝搬、typed errors のみ catch
+- Stream テスト: `createControllableStream` ヘルパーで `emit/end/fail` を外部制御（`Stream.async` の Emit API を型安全にラップ）
 
 ## 2026-03-03 - 初期セットアップ
 - 実装した内容:
@@ -226,4 +228,28 @@
   - `MutationInternals` の `subscribable.set` が contravariant なため、ジェネリック関数に `MutationInternals<unknown, unknown>` を渡すと型エラー。`Pick<..., "fiber">` で必要なフィールドのみを受け取るか、別インターフェースに分離する
   - observer fiber は mutation fiber の `Fiber.await` 結果を待つだけなので、直接キャンセルする必要はない。mutation fiber をinterruptすれば observer は Interrupt exit を受け取り、`internals.fiber !== fiber` ガードで安全に無視される（EffectStore と同じパターン）
   - `_input: void` は ESLint `@typescript-eslint/no-invalid-void-type` エラー → `_input: undefined` を使用
+---
+
+## 2026-03-03 - useEffectStream フック実装 (タスク 2.5)
+- 実装した内容:
+  - `useEffectStream<A, E>` フック: Effect.ts Stream を購読し最新の値を返す
+  - `StreamResult<A, E>` インターフェース: `result: EffectResult<A, E>` を提供
+  - `Stream.runForEach` で値を消費、各値で `subscribable.set(success(value))` で状態更新
+  - `Effect.catchAll` で typed errors のみを catch → `failure(Cause.fail(error))` に遷移
+  - Interrupt（unmount/stream変更）は自然に伝搬し、状態を更新しない
+  - EffectStore を使わず runtime + createSubscribable でコンポーネントローカル管理（mutation と同じパターン）
+  - Pull-based backpressure: `runForEach` の特性で自然にバックプレッシャーが効く
+  - 10テスト（有限Stream完了、async Pending→Success、Failure、sequential async、unmount cleanup、post-unmount安全性、stream completion保持、empty stream、error after values、StrictMode）
+- 変更したファイル:
+  - packages/react/src/useEffectStream.ts (新規)
+  - packages/react/src/index.ts (re-export追加)
+  - packages/react/tests/useEffectStream.test.tsx (新規)
+  - tasks/02-react-integration.md (タスク2.5を完了マーク)
+- カバレッジ: 100% → 100% (useEffectStream.ts 100%)
+- **今後のイテレーションへの学び:**
+  - Stream フックは mutation と同じくコンポーネントローカル管理が適切。EffectStore はクエリキャッシュ用
+  - `Stream.async` の `Emit` API: `emitter.single(value)`, `emitter.end()`, `emitter.fail(error)` が型安全
+  - `Effect.catchAll` は typed errors (E) のみを catch し、interrupt は自然に伝搬。`Effect.catchAllCause` は interrupt も catch してしまうため不適切
+  - `Effect.exit` + `Cause.isInterruptedOnly` パターンは interrupt が fire-and-forget の場合カバレッジが取りにくい。`Effect.catchAll` の方がシンプルで100%カバレッジ達成しやすい
+  - テストで `Stream.async` の emitter をテスト側で制御する場合、`createControllableStream` ヘルパーパターンが有効（型安全にemit/end/failを外部制御）
 ---
