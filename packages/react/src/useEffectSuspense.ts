@@ -143,12 +143,10 @@ export const useEffectSuspense = <A, E>(
     case "Failure": {
       throw new EffectError<E>(result.cause);
     }
-    case "Success": {
-      // Clear the cached promise on success so a future suspension gets a fresh one
-      suspenseState.current.promise = null;
-      return result.value;
-    }
+    case "Success":
     case "Refreshing": {
+      // Clear the cached promise so a future suspension gets a fresh one
+      suspenseState.current.promise = null;
       return result.value;
     }
   }
