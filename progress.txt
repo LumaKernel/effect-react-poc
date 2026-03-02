@@ -46,6 +46,26 @@
 - Layer合成: `ServiceLive.pipe(Layer.provide(DependencyLive))` で依存注入
 - @effect/platform HttpClient: `HttpClientResponse.schemaBodyJson` は Scope を要求 → `Effect.scoped` が必要
 - HttpClient 自己完結 Effect: `Effect.provide(FetchHttpClient.layer)` で R=never にして useEffectQuery に渡す
+- Deferred ゲートパターン: Stream.paginateChunkEffect 内で `Deferred.await` → React ref 経由で `Deferred.succeed` するとユーザー操作でストリーム進行を制御可能
+- `Deferred.make<undefined>()` を使う（`void` は `@typescript-eslint/no-invalid-void-type` でエラー）
+
+## 2026-03-03 - infinite-scroll example (タスク 4.5)
+- 実装した内容:
+  - examples/infinite-scroll: Stream.paginateChunkEffect + Deferred + IntersectionObserver による無限スクロール
+  - api.ts: fetchPage（offset-basedページネーション） + PageState型定義
+  - useInfiniteScroll.ts: Stream.paginateChunkEffect + Deferred でユーザー操作ベースのページ送り + Stream.mapAccum で累積
+  - PostList.tsx: IntersectionObserver で sentinel 要素の可視性を検知し loadMore() を呼び出し
+  - App.tsx: EffectProvider + PostList のシンプル構成
+- 変更したファイル:
+  - examples/infinite-scroll/ (新規: package.json, tsconfig.json, vite.config.ts, index.html, src/*.tsx, src/*.ts)
+  - pnpm-lock.yaml
+- カバレッジ: 100% → 100% (変化なし、examples はカバレッジ対象外)
+- **今後のイテレーションへの学び:**
+  - `Stream.paginateChunkEffect` は pull-based だが `useEffectStream` の `runForEach` がsyncで消費するため、ページ間にゲートが必要
+  - `Deferred.make<undefined>()` を使う（`Deferred.make<void>()` は `@typescript-eslint/no-invalid-void-type` でエラー）
+  - ストリーム内の Deferred を React 側の ref 経由で resolve するパターンで、ユーザー操作でストリームの進行を制御可能
+  - `matchEffectResult` の Success/Refreshing handler は `{ value }` でデストラクチャリング（直接プロパティアクセスではない）
+---
 
 ## 2026-03-03 - data-fetching example (タスク 4.4)
 - 実装した内容:
