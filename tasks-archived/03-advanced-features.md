@@ -21,3 +21,16 @@
 - [x] `useEffectQuery`にscheduleオプション
 - [x] 指数バックオフ、fibonacci等のプリセット
 - [x] リトライ状態の可視化（attempt回数、次のリトライまでの時間）
+
+### 3.4 楽観的更新（Optimistic Updates）
+
+- [x] mutation前に仮の成功値をストアに反映
+- [x] mutation成功時はそのまま
+- [x] mutation失敗時にロールバック
+- [x] ロールバック中の他のmutationとの競合解決
+
+### 3.5 Reactivityサービス統合
+
+- [x] effect-atomの`Atom.runtime`パターン参考
+- [x] mutationがqueryを自動無効化するReactivityサービス
+- [x] タグベースの依存追跡

@@ -35,6 +35,36 @@
 - EffectStore retry: `Schedule.tapOutput` でリトライ回数カウント。`RunOptions<E>` で schedule を渡し、`RetryState` を別 `Subscribable` で公開
 - EffectStore optimistic: `setOptimistic(key, value)` → `OptimisticRollback.rollback()` で復元。version カウンタで競合検出（後勝ち）
 - useEffectMutation: `MutationOptions.onMutate` が `OptimisticRollback` を返すと失敗時に自動ロールバック
+- EffectStore tags: `RunOptions.tags` でエントリにタグ付け。`invalidateByTags(tags)` / `QueryFilter { type: "tags" }` でタグベース無効化
+- useEffectMutation: `MutationOptions.invalidateTags` で成功時に関連クエリを自動再フェッチ
+
+## 2026-03-03 - Reactivityサービス統合 (タスク 3.5)
+- 実装した内容:
+  - EffectStore: `RunOptions` に `tags?: readonly string[]` 追加。StoreEntry にタグ保存
+  - EffectStore: `invalidateByTags(tags)` メソッド追加（タグのOR条件で無効化）
+  - EffectStore: `QueryFilter` に `{ type: "tags"; tags: readonly string[] }` 追加
+  - EffectStore: タグインデックス（tag → Set<key>）で逆引き管理
+  - EffectStore: `clearCache` / `resetEntry` / `dispose` でタグインデックスをクリーンアップ
+  - EffectObserver: `EffectObserverOptions` に `tags` 追加、`store.run` にパススルー
+  - useEffectQuery: `UseEffectQueryOptions` に `tags` 追加
+  - useEffectMutation: `MutationOptions` に `invalidateTags` 追加。成功時に `store.invalidateByTags(tags)` を自動呼出
+  - 16テスト追加（EffectStore: 10, EffectObserver: 2, useEffectQuery: 1, useEffectMutation: 3）、合計222テスト
+- 変更したファイル:
+  - packages/core/src/EffectStore.ts (tags, invalidateByTags, QueryFilter拡張, tagIndex)
+  - packages/core/src/EffectObserver.ts (tags option追加)
+  - packages/core/tests/EffectStore.test.ts (10テスト追加)
+  - packages/core/tests/EffectObserver.test.ts (2テスト追加)
+  - packages/react/src/useEffectQuery.ts (tags option追加)
+  - packages/react/src/useEffectMutation.ts (invalidateTags option追加, store.invalidateByTags呼出)
+  - packages/react/tests/useEffectQuery.test.tsx (1テスト追加)
+  - packages/react/tests/useEffectMutation.test.tsx (3テスト追加)
+- カバレッジ: 100% → 100% (変化なし)
+- **今後のイテレーションへの学び:**
+  - タグインデックス（tag → Set<key>）は効率的だが、invalidateQueries/clearCacheByFilter の汎用パスで matchesFilter を使う方がコードの重複を避けられ、テストカバレッジも確保しやすい
+  - `matchesFilter` に tags ケースを追加する場合、既存の呼び出し元にも entryTags パラメータの追加が必要。設計時に関数シグネチャの変更影響範囲を確認すること
+  - `invalidateByTags` は `invalidateQueries({ type: "tags", tags })` への委譲で実装。便利メソッドとして公開しつつ、内部は統一パスを利用
+  - mutation の `invalidateTags` は成功時のみ発火。失敗時はロールバック（onMutate由来）のみでクエリ無効化しない設計
+---
 
 ## 2026-03-03 - 初期セットアップ
 - 実装した内容:
