@@ -28,6 +28,10 @@
 - EffectBoundary: Suspense + ErrorBoundary 統合。`renderError` 未指定時はエラー伝搬。非 EffectError は常に親に伝搬
 - EffectValue: React.memo + useRef で render prop の関数参照を安定化。effect も ref 化して memo 境界を維持
 - ネストProvider: `EffectLayerContext` で親Layerを共有 → `Layer.merge(parentLayer, childLayer)` で自動合成。子サービスが優先
+- QueryFilter: discriminated union (type: "exact" | "prefix" | "predicate" | "all") でフィルタパターン表現
+- `luma-ts/no-date`: `Date.now()` 禁止。`getNow()` ラッパー + eslint-disable で対処（Temporal未対応環境）
+- EffectStore config: `gcTime` (旧 gcGracePeriodMs) + `staleTime` (default: 0 = 常にstale)
+- `resetEntry` vs `cleanupEntry`: resetEntry は subscriber 維持（clearCache用）、cleanupEntry は完全削除（GC用）
 
 ## 2026-03-03 - 初期セットアップ
 - 実装した内容:
@@ -341,4 +345,29 @@
   - `createContext<Layer<any, any>>` で型消去した Layer をネストで共有し、`useMemo` で合成するパターンが有効
   - デストラクチャリングパラメータに `readonly` は書けない（esbuild パースエラー）。型側の interface で `readonly` を指定
   - `let` 変数にクロージャ経由で代入する場合、TypeScript の制御フロー解析が追跡できず `never` 型になる。配列に push して `.at(-1)` で取得するパターンで回避
+---
+
+## 2026-03-03 - EffectStore キャッシュ管理拡張 (タスク 3.2 部分)
+- 実装した内容:
+  - `invalidateQueries(filter: QueryFilter)`: exact/prefix/predicate/all の4種類のフィルタで一括無効化
+  - `staleTime` 設定: データ鮮度管理。`settledAt` タイムスタンプで Success/Failure 遷移時刻を記録
+  - `isStale(key)` メソッド: staleTime に基づくデータ鮮度チェック
+  - `clearCache(key)`: 特定キーのキャッシュをクリア（fiber interrupt + Initial 遷移 + subscriber 通知）
+  - `clearCacheByFilter(filter)`: フィルタでまとめてクリア
+  - `gcGracePeriodMs` → `gcTime` にリネーム（TanStack Query 風命名）
+  - `QueryFilter` 型を core/index.ts からエクスポート
+  - 18テスト追加（合計166テスト、カバレッジ100%維持）
+- 変更したファイル:
+  - packages/core/src/EffectStore.ts (QueryFilter型、invalidateQueries, isStale, clearCache, clearCacheByFilter, settledAt, gcTime)
+  - packages/core/src/index.ts (QueryFilter エクスポート追加)
+  - packages/core/tests/EffectStore.test.ts (18テスト追加、gcGracePeriodMs→gcTime)
+  - packages/core/tests/EffectObserver.test.ts (gcGracePeriodMs→gcTime)
+  - tasks/03-advanced-features.md (タスク3.2部分完了マーク)
+- カバレッジ: 100% → 100% (変化なし)
+- **今後のイテレーションへの学び:**
+  - `luma-ts/no-date` ルール: `Date.now()` は禁止。`getNow()` ラッパーを作り eslint-disable で対処（Temporal API が利用不可のため）
+  - fake timers + Effect.ts の observer fiber の組み合わせはタイミングが難しい。`vi.waitFor` のポーリングとfake Date.now()が相互作用する。staleTime テストは real timer + 短い staleTime で書くのが確実
+  - `QueryFilter` は discriminated union (type: "exact" | "prefix" | "predicate" | "all") で表現。exhaustive switch で matchesFilter を実装
+  - `resetEntry` (clearCache用) と `cleanupEntry` (GC用) を分離: resetEntry は entries.delete しない（subscriber への通知のため）、cleanupEntry は完全削除
+  - staleTime のデフォルト 0 = "常に stale"。EffectObserver の isStale チェックは react 側の useEffectQuery で行うべき（EffectObserver 自体に組み込むと既存テスト・挙動が変わる）
 ---
