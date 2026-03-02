@@ -51,6 +51,25 @@
 - v8 coverage: switch の同一処理 case は統合する（CI/localでカバレッジ差異が出るフレーク防止）
 - EffectBoundary renderError: `Cause<unknown>` を受け取る（型消去）。`instanceof` で AppError に runtime narrowing
 
+## 2026-03-03 - resource-cleanup example (タスク 4.10)
+- 実装した内容:
+  - examples/resource-cleanup: useEffectScope によるリソースクリーンアップのデモ
+  - EventListenerDemo.tsx: window resize リスナーの登録/解除をScope finalizerで管理
+  - IntervalDemo.tsx: setInterval のライフサイクル管理。開始/停止ログ表示
+  - AbortControllerDemo.tsx: fetch の AbortController をScope finalizerで管理。アンマウント時に自動abort
+  - CombinedResourceDemo.tsx: 3リソース（EventListener + Interval + AbortController）を単一Scopeで管理。LIFO cleanup順序の可視化
+  - App.tsx: EffectProvider(Layer.empty) + ToggleSection（mount/unmount切替）で4セクション構成
+- 変更したファイル:
+  - examples/resource-cleanup/ (新規: package.json, tsconfig.json, vite.config.ts, index.html, src/*.tsx)
+  - tsconfig.json (examples/resource-cleanup 参照追加)
+  - pnpm-lock.yaml
+- カバレッジ: 100% → 100% (変化なし、examples はカバレッジ対象外)
+- **今後のイテレーションへの学び:**
+  - `useEffectScope` の `addFinalizer` は複数回呼び出し可能。LIFO順序でクリーンアップされることを可視化するのが効果的
+  - `react/no-array-index-key` ルールはこのプロジェクトでは未定義。eslint-disable コメントを付けると逆にエラーになる
+  - `luma-ts/require-satisfies-in-tls` はテンプレートリテラル内の**すべての式**に必要。変数宣言時の `satisfies` だけでは不十分で、テンプレートリテラル内で再度 `satisfies` を付ける必要がある
+---
+
 ## 2026-03-03 - retry-with-fallback example (タスク 4.9)
 - 実装した内容:
   - examples/retry-with-fallback: リトライとフォールバックパターンのデモ
