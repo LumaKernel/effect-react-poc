@@ -10,3 +10,5 @@ export {
 } from "./EffectProvider.js";
 
 export { useEffectQuery } from "./useEffectQuery.js";
+
+export { EffectError, useEffectSuspense } from "./useEffectSuspense.js";
