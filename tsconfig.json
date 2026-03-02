@@ -32,6 +32,7 @@
     { "path": "examples/real-time-chat" },
     { "path": "examples/parallel-requests" },
     { "path": "examples/typed-errors" },
+    { "path": "examples/retry-with-fallback" },
     { "path": "tsconfig.node.json" }
   ],
   "files": []
