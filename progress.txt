@@ -48,6 +48,7 @@
 - HttpClient 自己完結 Effect: `Effect.provide(FetchHttpClient.layer)` で R=never にして useEffectQuery に渡す
 - Deferred ゲートパターン: Stream.paginateChunkEffect 内で `Deferred.await` → React ref 経由で `Deferred.succeed` するとユーザー操作でストリーム進行を制御可能
 - `Deferred.make<undefined>()` を使う（`void` は `@typescript-eslint/no-invalid-void-type` でエラー）
+- v8 coverage: switch の同一処理 case は統合する（CI/localでカバレッジ差異が出るフレーク防止）
 
 ## 2026-03-03 - real-time-chat example (タスク 4.6)
 - 実装した内容:
@@ -75,6 +76,8 @@
   - Stream.retry + Schedule.exponential + Schedule.compose(Schedule.recurs) でリトライ回数制限付き指数バックオフ
   - Effect.sleep に template literal は DurationInput として不正。数値 (milliseconds) を直接渡す
   - 欠損していた examples/infinite-scroll の tsconfig 参照も追加した
+  - v8 coverage は switch の各 case ブロックを独立して計測する。CI と local で coverage が異なる場合は、同じ処理の case を統合して flake を防ぐ
+  - CI 失敗: useEffectSuspense の Success/Refreshing 分岐を統合して解決
 ---
 
 ## 2026-03-03 - infinite-scroll example (タスク 4.5)
