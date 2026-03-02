@@ -31,6 +31,7 @@
     { "path": "examples/infinite-scroll" },
     { "path": "examples/real-time-chat" },
     { "path": "examples/parallel-requests" },
+    { "path": "examples/typed-errors" },
     { "path": "tsconfig.node.json" }
   ],
   "files": []
