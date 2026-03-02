@@ -14,6 +14,9 @@
 - EffectObserver: subscribe→run の順序で通知を漏らさない（store.subscribeを先に呼ぶ）
 - React テスト: `@vitest-environment jsdom` コメント + `@testing-library/react` の `renderHook`/`render`
 - React Context 型消去: `createContext<any>` + フック呼び出し時の `<R, E>` 型指定
+- StoreRuntime: Fiber エラー型を `unknown` にすることで ManagedRuntime<R, E> と互換
+- EffectProvider: EffectStore も Context で提供。runtime と同じライフサイクルで作成・dispose
+- useEffectQuery: `useSyncExternalStore` + `createEffectObserver` の組み合わせ。key でキャッシュ共有
 
 ## 2026-03-03 - 初期セットアップ
 - 実装した内容:
@@ -148,4 +151,27 @@
   - `ManagedRuntime.make(Layer.empty)` は vitest + jsdom 環境で問題なく動作する。ただし `Layer.mergeAll(Layer.empty)` は `_op_layer` エラーを起こすことがある
   - vitest で jsdom 環境を使うには `@vitest-environment jsdom` コメントをテストファイル先頭に追加する
   - React テスト用に `.tsx` ファイルのテストパターンを `vitest.config.ts` の include に追加する必要がある
+---
+
+## 2026-03-03 - useEffectQuery フック実装 (タスク 2.2)
+- 実装した内容:
+  - `useEffectQuery` フック: `useSyncExternalStore` + `createEffectObserver` で Effect 実行結果を購読
+  - EffectProvider 拡張: EffectStore を Context 経由で子コンポーネントに提供
+  - `useEffectStore` フック: Provider 内部の EffectStore を取得
+  - `StoreRuntime` インターフェース修正: Fiber エラー型を `unknown` に変更（ManagedRuntime<R, E> 互換）
+  - 8テスト追加（状態遷移 sync/async、Failure、キー変更、unmount、StrictMode、キャッシュ共有、useEffectStore エラー）
+- 変更したファイル:
+  - packages/react/src/useEffectQuery.ts (新規)
+  - packages/react/src/EffectProvider.tsx (EffectStore Context追加、useEffectStore追加)
+  - packages/react/src/index.ts (re-export追加)
+  - packages/react/tests/useEffectQuery.test.tsx (新規)
+  - packages/react/tests/EffectProvider.test.tsx (useEffectStore エラーテスト追加)
+  - packages/core/src/EffectStore.ts (StoreRuntime.runFork の戻り値型修正)
+- カバレッジ: 100% → 100%
+- **今後のイテレーションへの学び:**
+  - `ManagedRuntime<R, E>.runFork<A, EffE>` は `RuntimeFiber<A, EffE | LayerE>` を返す。StoreRuntime で `unknown` にすることで型互換性が解決
+  - `Effect.async<T>((cb) => { ... })` でコールバック駆動の非同期テストが簡潔に書ける（Deferred.unsafeMake は API が変わりやすい）
+  - ESLint `@typescript-eslint/await-thenable`: `act(() => { ... })` が void を返す場合は `await` 不要
+  - ESLint `@typescript-eslint/no-unnecessary-type-parameters`: ヘルパー関数で型パラメータが1箇所しか使われない場合はエラー
+  - `exactOptionalPropertyTypes` が有効なので、関数に余分なプロパティを持つオブジェクトを渡せない
 ---
