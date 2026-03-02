@@ -33,6 +33,8 @@
 - EffectStore config: `gcTime` (旧 gcGracePeriodMs) + `staleTime` (default: 0 = 常にstale)
 - `resetEntry` vs `cleanupEntry`: resetEntry は subscriber 維持（clearCache用）、cleanupEntry は完全削除（GC用）
 - EffectStore retry: `Schedule.tapOutput` でリトライ回数カウント。`RunOptions<E>` で schedule を渡し、`RetryState` を別 `Subscribable` で公開
+- EffectStore optimistic: `setOptimistic(key, value)` → `OptimisticRollback.rollback()` で復元。version カウンタで競合検出（後勝ち）
+- useEffectMutation: `MutationOptions.onMutate` が `OptimisticRollback` を返すと失敗時に自動ロールバック
 
 ## 2026-03-03 - 初期セットアップ
 - 実装した内容:
@@ -419,4 +421,31 @@
   - `Schedule.Schedule<Out, In>` の `In` パラメータはデフォルトが `unknown` なので省略可能。ESLint `@typescript-eslint/no-unnecessary-type-arguments` で指摘される
   - store 内部の型消去で `Schedule.Schedule<unknown, E>` → `Schedule.Schedule<unknown>` にキャストが必要。既存の EffectResult 型消去パターンと一貫
   - `exactOptionalPropertyTypes` 有効時、`{ schedule: maybeUndefined }` は型エラー。`schedule ? { schedule } : undefined` で条件付きオブジェクト生成が必要
+---
+
+## 2026-03-03 - 楽観的更新（Optimistic Updates） (タスク 3.4)
+- 実装した内容:
+  - EffectStore に `setOptimistic(key, value): OptimisticRollback` メソッド追加
+  - `OptimisticRollback` インターフェース: `rollback()` で楽観的更新前の値に復元
+  - バージョンカウンタ (`version`) による競合検出: `setOptimistic`, `run`, `clearCache`, observer settle で version をインクリメント
+  - rollback は同じ version の場合のみ復元（他の mutation/run で上書き済みなら no-op: 後勝ち）
+  - `useEffectMutation` に `MutationOptions<I, A, E>` 追加:
+    - `onMutate(input)`: mutation 開始前コールバック。`OptimisticRollback` を返すと失敗時に自動ロールバック
+    - `onSuccess(value, input)`: 成功後コールバック
+    - `onError(cause, input)`: 失敗後コールバック（自動ロールバック後に呼ばれる）
+  - 17テスト追加（core: 10, react: 7）、合計206テスト
+- 変更したファイル:
+  - packages/core/src/EffectStore.ts (OptimisticRollback, setOptimistic, version カウンタ)
+  - packages/core/src/index.ts (OptimisticRollback エクスポート)
+  - packages/core/tests/EffectStore.test.ts (10テスト追加)
+  - packages/react/src/useEffectMutation.ts (MutationOptions, onMutate/onSuccess/onError)
+  - packages/react/src/index.ts (MutationOptions エクスポート)
+  - packages/react/tests/useEffectMutation.test.tsx (7テスト追加)
+- カバレッジ: 100% → 100% (変化なし)
+- **今後のイテレーションへの学び:**
+  - 楽観的更新の競合検出にはバージョンカウンタが最もシンプル。参照等価性（`Object.is`）だと同値の異なるオブジェクトで誤判定する
+  - observer fiber が settle した時も version をインクリメントしないと、楽観的更新→effect 完了の順序で rollback が古い値に戻してしまう
+  - `let` 変数 + closure + `vi.waitFor` の組み合わせでは TypeScript の制御フロー解析が `never` に推論することがある。配列に push + `.at(0)` パターンで回避
+  - `onMutate` の戻り値型は `OptimisticRollback | undefined`（`void` は ESLint `no-invalid-void-type` でエラー）
+  - `@typescript-eslint/no-unnecessary-type-parameters`: 型パラメータが1箇所しか使われない場合は `unknown` に置き換える（`setOptimistic<A>(key, value: A)` → `setOptimistic(key, value: unknown)`）
 ---
