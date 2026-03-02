@@ -12,6 +12,19 @@ import type { MutableSubscribable, Subscribable } from "./Subscribable.js";
 import { createSubscribable } from "./Subscribable.js";
 
 /**
+ * Filter for selecting cache entries by key pattern.
+ *
+ * When adding a new filter shape:
+ * - Update `matchesFilter` implementation
+ * - Update tests in `packages/core/tests/EffectStore.test.ts`
+ */
+export type QueryFilter =
+  | { readonly type: "exact"; readonly key: string }
+  | { readonly type: "prefix"; readonly prefix: string }
+  | { readonly type: "predicate"; readonly predicate: (key: string) => boolean }
+  | { readonly type: "all" };
+
+/**
  * Configuration for EffectStore.
  *
  * When adding a new config option:
@@ -20,14 +33,25 @@ import { createSubscribable } from "./Subscribable.js";
  */
 export interface EffectStoreConfig {
   /**
-   * Grace period in milliseconds before an unsubscribed entry is garbage collected.
+   * Time in milliseconds before an unsubscribed entry is garbage collected.
    * Set to 0 for immediate cleanup. Default: 30000 (30 seconds).
    */
-  readonly gcGracePeriodMs: number;
+  readonly gcTime: number;
+
+  /**
+   * Time in milliseconds after data settles (Success/Failure) before it's
+   * considered stale. While fresh, re-subscribing will not re-fetch.
+   * Set to 0 for "always stale" (always re-fetch). Default: 0.
+   */
+  readonly staleTime: number;
 }
 
+// eslint-disable-next-line luma-ts/no-date -- Temporal API not yet available in target runtimes
+const getNow = (): number => Date.now();
+
 const defaultEffectStoreConfig: EffectStoreConfig = {
-  gcGracePeriodMs: 30_000,
+  gcTime: 30_000,
+  staleTime: 0,
 };
 
 /**
@@ -40,6 +64,8 @@ interface StoreEntry {
   subscriberCount: number;
   gcTimer: ReturnType<typeof setTimeout> | null;
   effect: Effect.Effect<unknown, unknown> | null;
+  /** Timestamp (Date.now()) when the entry last settled to Success or Failure. null if never settled. */
+  settledAt: number | null;
 }
 
 /**
@@ -49,6 +75,7 @@ interface StoreEntry {
  * - Effects are executed via a provided runtime
  * - Fibers are tracked per key and interrupted on re-run, invalidation, or dispose
  * - GC with configurable grace period cleans up entries after last unsubscribe
+ * - staleTime controls when data is considered stale and should be re-fetched
  *
  * When modifying this interface:
  * - Update `createEffectStore` implementation
@@ -76,6 +103,33 @@ export interface EffectStore {
    * No-op if no effect has been run for this key.
    */
   readonly invalidate: (key: string) => void;
+
+  /**
+   * Invalidate all entries matching the given filter.
+   * Only entries with a stored effect are re-run.
+   */
+  readonly invalidateQueries: (filter: QueryFilter) => void;
+
+  /**
+   * Check if data for a key is stale (based on staleTime config).
+   * Returns true if:
+   * - No entry exists for the key
+   * - Entry has never settled (Initial/Pending state)
+   * - Entry settled longer ago than staleTime
+   */
+  readonly isStale: (key: string) => boolean;
+
+  /**
+   * Clear cache for a specific key, resetting it to Initial.
+   * Interrupts any running fiber for the key.
+   */
+  readonly clearCache: (key: string) => void;
+
+  /**
+   * Clear cache for all entries matching the given filter.
+   * Interrupts any running fibers for matched keys.
+   */
+  readonly clearCacheByFilter: (filter: QueryFilter) => void;
 
   /**
    * Subscribe to changes for a key.
@@ -117,6 +171,19 @@ export interface StoreRuntime {
   ) => Fiber.RuntimeFiber<A, unknown>;
 }
 
+const matchesFilter = (filter: QueryFilter, key: string): boolean => {
+  switch (filter.type) {
+    case "exact":
+      return filter.key === key;
+    case "prefix":
+      return key.startsWith(filter.prefix);
+    case "predicate":
+      return filter.predicate(key);
+    case "all":
+      return true;
+  }
+};
+
 /**
  * Create an EffectStore with the given runtime and optional configuration.
  *
@@ -146,6 +213,7 @@ export const createEffectStore = (
       subscriberCount: 0,
       gcTimer: null,
       effect: null,
+      settledAt: null,
     };
     entries.set(key, entry);
     return entry;
@@ -160,13 +228,13 @@ export const createEffectStore = (
 
   const scheduleGc = (key: string, entry: StoreEntry): void => {
     cancelGcTimer(entry);
-    if (resolvedConfig.gcGracePeriodMs <= 0) {
+    if (resolvedConfig.gcTime <= 0) {
       cleanupEntry(key, entry);
       return;
     }
     entry.gcTimer = setTimeout(() => {
       cleanupEntry(key, entry);
-    }, resolvedConfig.gcGracePeriodMs);
+    }, resolvedConfig.gcTime);
   };
 
   const cleanupEntry = (key: string, entry: StoreEntry): void => {
@@ -177,7 +245,25 @@ export const createEffectStore = (
     }
     entry.subscribable.set(initial);
     entry.effect = null;
+    entry.settledAt = null;
     entries.delete(key);
+  };
+
+  const resetEntry = (key: string, entry: StoreEntry): void => {
+    cancelGcTimer(entry);
+    if (entry.fiber !== null) {
+      runtime.runFork(Fiber.interruptFork(entry.fiber));
+      entry.fiber = null;
+    }
+    entry.subscribable.set(initial);
+    entry.effect = null;
+    entry.settledAt = null;
+    // Unlike cleanupEntry, we don't delete the entry from the map
+    // so that subscribers are notified of the state change.
+    // If there are no subscribers, schedule GC.
+    if (entry.subscriberCount <= 0) {
+      entries.delete(key);
+    }
   };
 
   const interruptFiber = (entry: StoreEntry): void => {
@@ -228,9 +314,11 @@ export const createEffectStore = (
 
       Exit.match(exit, {
         onFailure: (cause) => {
+          currentEntry.settledAt = getNow();
           currentEntry.subscribable.set(failure(cause));
         },
         onSuccess: (value) => {
+          currentEntry.settledAt = getNow();
           currentEntry.subscribable.set(success(value));
         },
       });
@@ -261,6 +349,53 @@ export const createEffectStore = (
         return;
       }
       runEffect(key, entry.effect);
+    },
+
+    invalidateQueries: (filter: QueryFilter): void => {
+      // Snapshot keys to avoid mutation during iteration
+      const keys = [...entries.keys()];
+      for (const key of keys) {
+        if (matchesFilter(filter, key)) {
+          const entry = entries.get(key);
+          if (entry?.effect) {
+            runEffect(key, entry.effect);
+          }
+        }
+      }
+    },
+
+    isStale: (key: string): boolean => {
+      const entry = entries.get(key);
+      if (!entry) {
+        return true;
+      }
+      if (entry.settledAt === null) {
+        return true;
+      }
+      if (resolvedConfig.staleTime <= 0) {
+        return true;
+      }
+      return getNow() - entry.settledAt >= resolvedConfig.staleTime;
+    },
+
+    clearCache: (key: string): void => {
+      const entry = entries.get(key);
+      if (!entry) {
+        return;
+      }
+      resetEntry(key, entry);
+    },
+
+    clearCacheByFilter: (filter: QueryFilter): void => {
+      const keys = [...entries.keys()];
+      for (const key of keys) {
+        if (matchesFilter(filter, key)) {
+          const entry = entries.get(key);
+          if (entry) {
+            resetEntry(key, entry);
+          }
+        }
+      }
     },
 
     subscribe: (key: string, callback: () => void): (() => void) => {

@@ -7,7 +7,7 @@ import { initial, success } from "../src/EffectResult.js";
 /**
  * Helper: create a store with a simple runtime (no services).
  */
-const createTestStore = (config?: { readonly gcGracePeriodMs?: number }) => {
+const createTestStore = (config?: { readonly gcTime?: number }) => {
   const runtime = ManagedRuntime.make(Layer.empty);
   const store = createEffectStore(runtime, config);
   return { store, runtime };
@@ -123,7 +123,7 @@ describe("EffectObserver", () => {
     it("last unsubscribe triggers GC schedule on the store", async () => {
       vi.useFakeTimers();
       try {
-        const { store, runtime } = createTestStore({ gcGracePeriodMs: 100 });
+        const { store, runtime } = createTestStore({ gcTime: 100 });
         const observer = createEffectObserver(store, "key", Effect.succeed(42));
 
         const unsub = observer.subscribe(() => {});
@@ -152,7 +152,7 @@ describe("EffectObserver", () => {
     it("re-subscribe within grace period does not re-execute", async () => {
       vi.useFakeTimers();
       try {
-        const { store, runtime } = createTestStore({ gcGracePeriodMs: 100 });
+        const { store, runtime } = createTestStore({ gcTime: 100 });
         let callCount = 0;
         const effect = Effect.sync(() => {
           callCount++;
@@ -193,7 +193,7 @@ describe("EffectObserver", () => {
     it("re-subscribe after GC cleanup re-executes the effect", async () => {
       vi.useFakeTimers();
       try {
-        const { store, runtime } = createTestStore({ gcGracePeriodMs: 100 });
+        const { store, runtime } = createTestStore({ gcTime: 100 });
         let callCount = 0;
         const effect = Effect.sync(() => {
           callCount++;
@@ -261,7 +261,7 @@ describe("EffectObserver", () => {
     });
 
     it("unsubscribing one does not affect others", async () => {
-      const { store, runtime } = createTestStore({ gcGracePeriodMs: 0 });
+      const { store, runtime } = createTestStore({ gcTime: 0 });
       const observer = createEffectObserver(store, "key", Effect.succeed(42));
 
       const cb1 = vi.fn();

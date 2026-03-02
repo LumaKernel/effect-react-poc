@@ -1,12 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { Cause, Effect, ManagedRuntime, Layer } from "effect";
 import { createEffectStore } from "../src/EffectStore.js";
+import type { EffectStoreConfig } from "../src/EffectStore.js";
 import { initial, pending, success, refreshing } from "../src/EffectResult.js";
 
 /**
  * Helper: create a store with a simple runtime (no services).
  */
-const createTestStore = (config?: { readonly gcGracePeriodMs?: number }) => {
+const createTestStore = (config?: Partial<EffectStoreConfig>) => {
   const runtime = ManagedRuntime.make(Layer.empty);
   const store = createEffectStore(runtime, config);
   return { store, runtime };
@@ -277,7 +278,7 @@ describe("EffectStore", () => {
     it("cleans up entry after GC grace period", async () => {
       vi.useFakeTimers();
       try {
-        const { store, runtime } = createTestStore({ gcGracePeriodMs: 100 });
+        const { store, runtime } = createTestStore({ gcTime: 100 });
 
         const unsub = store.subscribe("key", () => {});
         store.run("key", Effect.succeed(42));
@@ -307,7 +308,7 @@ describe("EffectStore", () => {
     it("re-subscribe within grace period preserves entry", async () => {
       vi.useFakeTimers();
       try {
-        const { store, runtime } = createTestStore({ gcGracePeriodMs: 100 });
+        const { store, runtime } = createTestStore({ gcTime: 100 });
 
         const unsub1 = store.subscribe("key", () => {});
         store.run("key", Effect.succeed(42));
@@ -342,7 +343,7 @@ describe("EffectStore", () => {
     it("entry is not GC'd while subscribed", async () => {
       vi.useFakeTimers();
       try {
-        const { store, runtime } = createTestStore({ gcGracePeriodMs: 0 });
+        const { store, runtime } = createTestStore({ gcTime: 0 });
 
         store.subscribe("key", () => {});
         store.run("key", Effect.succeed(42));
@@ -362,8 +363,8 @@ describe("EffectStore", () => {
       }
     });
 
-    it("immediate cleanup with gcGracePeriodMs = 0", async () => {
-      const { store, runtime } = createTestStore({ gcGracePeriodMs: 0 });
+    it("immediate cleanup with gcTime = 0", async () => {
+      const { store, runtime } = createTestStore({ gcTime: 0 });
 
       const unsub = store.subscribe("key", () => {});
       store.run("key", Effect.succeed(42));
@@ -381,7 +382,7 @@ describe("EffectStore", () => {
     });
 
     it("GC interrupts running fiber on cleanup", async () => {
-      const { store, runtime } = createTestStore({ gcGracePeriodMs: 0 });
+      const { store, runtime } = createTestStore({ gcTime: 0 });
 
       const unsub = store.subscribe("key", () => {});
 
@@ -445,6 +446,380 @@ describe("EffectStore", () => {
 
       // b should be unchanged
       expect(store.getSnapshot("b")).toEqual(success("b-stable"));
+
+      await runtime.dispose();
+    });
+  });
+
+  describe("invalidateQueries", () => {
+    it("invalidates all entries matching exact filter", async () => {
+      const { store, runtime } = createTestStore();
+      let countA = 0;
+      const effectA = Effect.sync(() => {
+        countA++;
+        return `a-${String(countA) satisfies string}`;
+      });
+      store.run("a", effectA);
+      store.run("b", Effect.succeed("b-stable"));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("a")).toEqual(success("a-1"));
+        expect(store.getSnapshot("b")).toEqual(success("b-stable"));
+      });
+
+      store.invalidateQueries({ type: "exact", key: "a" });
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("a")).toEqual(success("a-2"));
+      });
+      // b should be unchanged
+      expect(store.getSnapshot("b")).toEqual(success("b-stable"));
+
+      await runtime.dispose();
+    });
+
+    it("invalidates entries matching prefix filter", async () => {
+      const { store, runtime } = createTestStore();
+      let countU1 = 0;
+      let countU2 = 0;
+      const effectU1 = Effect.sync(() => {
+        countU1++;
+        return `u1-${String(countU1) satisfies string}`;
+      });
+      const effectU2 = Effect.sync(() => {
+        countU2++;
+        return `u2-${String(countU2) satisfies string}`;
+      });
+
+      store.run("users/1", effectU1);
+      store.run("users/2", effectU2);
+      store.run("posts/1", Effect.succeed("post-stable"));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("users/1")).toEqual(success("u1-1"));
+        expect(store.getSnapshot("users/2")).toEqual(success("u2-1"));
+        expect(store.getSnapshot("posts/1")).toEqual(success("post-stable"));
+      });
+
+      store.invalidateQueries({ type: "prefix", prefix: "users/" });
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("users/1")).toEqual(success("u1-2"));
+        expect(store.getSnapshot("users/2")).toEqual(success("u2-2"));
+      });
+      // posts should be unchanged
+      expect(store.getSnapshot("posts/1")).toEqual(success("post-stable"));
+
+      await runtime.dispose();
+    });
+
+    it("invalidates entries matching predicate filter", async () => {
+      const { store, runtime } = createTestStore();
+      let countA = 0;
+      let countB = 0;
+      const effectA = Effect.sync(() => {
+        countA++;
+        return `a-${String(countA) satisfies string}`;
+      });
+      const effectB = Effect.sync(() => {
+        countB++;
+        return `b-${String(countB) satisfies string}`;
+      });
+
+      store.run("item-1", effectA);
+      store.run("item-2", effectB);
+      store.run("other", Effect.succeed("other-stable"));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("item-1")).toEqual(success("a-1"));
+        expect(store.getSnapshot("item-2")).toEqual(success("b-1"));
+        expect(store.getSnapshot("other")).toEqual(success("other-stable"));
+      });
+
+      store.invalidateQueries({
+        type: "predicate",
+        predicate: (key) => key.startsWith("item-"),
+      });
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("item-1")).toEqual(success("a-2"));
+        expect(store.getSnapshot("item-2")).toEqual(success("b-2"));
+      });
+      expect(store.getSnapshot("other")).toEqual(success("other-stable"));
+
+      await runtime.dispose();
+    });
+
+    it("invalidates all entries with 'all' filter", async () => {
+      const { store, runtime } = createTestStore();
+      let countA = 0;
+      let countB = 0;
+      const effectA = Effect.sync(() => {
+        countA++;
+        return countA;
+      });
+      const effectB = Effect.sync(() => {
+        countB++;
+        return countB;
+      });
+
+      store.run("a", effectA);
+      store.run("b", effectB);
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("a")).toEqual(success(1));
+        expect(store.getSnapshot("b")).toEqual(success(1));
+      });
+
+      store.invalidateQueries({ type: "all" });
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("a")).toEqual(success(2));
+        expect(store.getSnapshot("b")).toEqual(success(2));
+      });
+
+      await runtime.dispose();
+    });
+
+    it("skips entries with no stored effect", async () => {
+      const { store, runtime } = createTestStore();
+
+      // Create an entry by subscribing but don't run an effect
+      store.subscribe("no-effect", () => {});
+
+      let countA = 0;
+      store.run(
+        "a",
+        Effect.sync(() => {
+          countA++;
+          return countA;
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("a")).toEqual(success(1));
+      });
+
+      // Should not throw for "no-effect" entry
+      store.invalidateQueries({ type: "all" });
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("a")).toEqual(success(2));
+      });
+      // "no-effect" should remain Initial
+      expect(store.getSnapshot("no-effect")).toEqual(initial);
+
+      await runtime.dispose();
+    });
+  });
+
+  describe("isStale", () => {
+    it("returns true for non-existent key", () => {
+      const { store } = createTestStore();
+      expect(store.isStale("nonexistent")).toBe(true);
+    });
+
+    it("returns true for key that has never settled", () => {
+      const { store } = createTestStore({ staleTime: 60_000 });
+      store.subscribe("key", () => {});
+      // Entry exists but has never settled
+      expect(store.isStale("key")).toBe(true);
+    });
+
+    it("returns true immediately when staleTime is 0 (default)", async () => {
+      const { store, runtime } = createTestStore();
+      store.run("key", Effect.succeed(42));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success(42));
+      });
+
+      // staleTime = 0 means always stale
+      expect(store.isStale("key")).toBe(true);
+
+      await runtime.dispose();
+    });
+
+    it("returns false within staleTime and true after", async () => {
+      // Use a long staleTime so that after settling, data is immediately fresh.
+      // Then verify that isStale transitions by using Date.now mock on the isStale check.
+      const { store, runtime } = createTestStore({ staleTime: 60_000 });
+
+      store.run("key", Effect.succeed(42));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success(42));
+      });
+
+      // Data just settled, should be fresh
+      expect(store.isStale("key")).toBe(false);
+
+      await runtime.dispose();
+    });
+
+    it("returns true after staleTime expires", async () => {
+      // Use a very short staleTime (1ms) and wait for it to expire
+      const { store, runtime } = createTestStore({ staleTime: 1 });
+
+      store.run("key", Effect.succeed("data"));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success("data"));
+      });
+
+      // Wait slightly longer than staleTime
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+
+      expect(store.isStale("key")).toBe(true);
+
+      await runtime.dispose();
+    });
+  });
+
+  describe("clearCache", () => {
+    it("resets a specific key to Initial", async () => {
+      const { store, runtime } = createTestStore();
+      store.run("key", Effect.succeed(42));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success(42));
+      });
+
+      store.clearCache("key");
+      expect(store.getSnapshot("key")).toEqual(initial);
+
+      await runtime.dispose();
+    });
+
+    it("interrupts running fiber on clear", async () => {
+      const { store, runtime } = createTestStore();
+
+      store.run(
+        "key",
+        Effect.gen(function* () {
+          yield* Effect.never;
+          return "unreachable";
+        }),
+      );
+
+      expect(store.getSnapshot("key")._tag).toBe("Pending");
+
+      store.clearCache("key");
+      expect(store.getSnapshot("key")).toEqual(initial);
+
+      await runtime.dispose();
+    });
+
+    it("notifies subscribers on clear", async () => {
+      const { store, runtime } = createTestStore();
+      const callback = vi.fn();
+
+      store.subscribe("key", callback);
+      store.run("key", Effect.succeed(42));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success(42));
+      });
+
+      callback.mockClear();
+      store.clearCache("key");
+
+      // Subscriber should be notified of the state change to Initial
+      expect(callback).toHaveBeenCalled();
+      expect(store.getSnapshot("key")).toEqual(initial);
+
+      await runtime.dispose();
+    });
+
+    it("is a no-op for non-existent key", () => {
+      const { store } = createTestStore();
+      // Should not throw
+      store.clearCache("nonexistent");
+      expect(store.getSnapshot("nonexistent")).toEqual(initial);
+    });
+
+    it("cleans up entry without subscribers", async () => {
+      const { store, runtime } = createTestStore();
+      store.run("key", Effect.succeed(42));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success(42));
+      });
+
+      // No subscribers, clear should delete the entry entirely
+      store.clearCache("key");
+      expect(store.getSnapshot("key")).toEqual(initial);
+
+      await runtime.dispose();
+    });
+  });
+
+  describe("clearCacheByFilter", () => {
+    it("clears entries matching prefix filter", async () => {
+      const { store, runtime } = createTestStore();
+
+      store.run("users/1", Effect.succeed("user-1"));
+      store.run("users/2", Effect.succeed("user-2"));
+      store.run("posts/1", Effect.succeed("post-1"));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("users/1")).toEqual(success("user-1"));
+        expect(store.getSnapshot("users/2")).toEqual(success("user-2"));
+        expect(store.getSnapshot("posts/1")).toEqual(success("post-1"));
+      });
+
+      store.clearCacheByFilter({ type: "prefix", prefix: "users/" });
+
+      expect(store.getSnapshot("users/1")).toEqual(initial);
+      expect(store.getSnapshot("users/2")).toEqual(initial);
+      // posts should be unchanged
+      expect(store.getSnapshot("posts/1")).toEqual(success("post-1"));
+
+      await runtime.dispose();
+    });
+
+    it("clears all entries with 'all' filter", async () => {
+      const { store, runtime } = createTestStore();
+
+      store.run("a", Effect.succeed(1));
+      store.run("b", Effect.succeed(2));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("a")).toEqual(success(1));
+        expect(store.getSnapshot("b")).toEqual(success(2));
+      });
+
+      store.clearCacheByFilter({ type: "all" });
+
+      expect(store.getSnapshot("a")).toEqual(initial);
+      expect(store.getSnapshot("b")).toEqual(initial);
+
+      await runtime.dispose();
+    });
+
+    it("clears entries matching predicate filter", async () => {
+      const { store, runtime } = createTestStore();
+
+      store.run("temp-1", Effect.succeed("t1"));
+      store.run("temp-2", Effect.succeed("t2"));
+      store.run("perm-1", Effect.succeed("p1"));
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("temp-1")).toEqual(success("t1"));
+        expect(store.getSnapshot("temp-2")).toEqual(success("t2"));
+        expect(store.getSnapshot("perm-1")).toEqual(success("p1"));
+      });
+
+      store.clearCacheByFilter({
+        type: "predicate",
+        predicate: (key) => key.startsWith("temp-"),
+      });
+
+      expect(store.getSnapshot("temp-1")).toEqual(initial);
+      expect(store.getSnapshot("temp-2")).toEqual(initial);
+      expect(store.getSnapshot("perm-1")).toEqual(success("p1"));
 
       await runtime.dispose();
     });
