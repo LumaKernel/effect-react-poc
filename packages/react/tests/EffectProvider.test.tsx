@@ -2,9 +2,10 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi } from "vitest";
-import { renderHook, render } from "@testing-library/react";
+import { renderHook, render, act } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { Layer, Effect } from "effect";
+import { useEffectQuery } from "../src/useEffectQuery.js";
 import type { EffectManagedRuntime } from "../src/EffectProvider.js";
 import {
   EffectProvider,
@@ -472,6 +473,186 @@ describe("EffectProvider", () => {
       });
 
       expect(productionValues.at(-1)).toBe("production: /data");
+    });
+  });
+
+  describe("refetchOnWindowFocus", () => {
+    it("refetches stale data on visibilitychange to visible", async () => {
+      let callCount = 0;
+      const effect = Effect.sync(() => {
+        callCount++;
+        return callCount;
+      });
+
+      const QueryConsumer = ({
+        onResult,
+      }: {
+        readonly onResult: (value: string) => void;
+      }) => {
+        const result = useEffectQuery("focus-test", effect);
+        onResult(result._tag);
+        if (result._tag === "Success") {
+          onResult(`Success:${String(result.value) satisfies string}`);
+        }
+        return null;
+      };
+
+      const results: string[] = [];
+
+      render(
+        <EffectProvider
+          layer={Layer.empty}
+          storeConfig={{ refetchOnWindowFocus: true, staleTime: 0 }}
+        >
+          <QueryConsumer
+            onResult={(v) => {
+              results.push(v);
+            }}
+          />
+        </EffectProvider>,
+      );
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(results).toContain("Success:1");
+      });
+
+      expect(callCount).toBe(1);
+
+      // Simulate visibilitychange to visible
+      act(() => {
+        Object.defineProperty(document, "visibilityState", {
+          value: "visible",
+          writable: true,
+          configurable: true,
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+
+      // Should refetch since staleTime is 0 (always stale)
+      await vi.waitFor(() => {
+        expect(results).toContain("Success:2");
+      });
+    });
+
+    it("refetches stale data on window focus event", async () => {
+      let callCount = 0;
+      const effect = Effect.sync(() => {
+        callCount++;
+        return callCount;
+      });
+
+      const QueryConsumer = ({
+        onResult,
+      }: {
+        readonly onResult: (value: string) => void;
+      }) => {
+        const result = useEffectQuery("focus-event-test", effect);
+        if (result._tag === "Success") {
+          onResult(`Success:${String(result.value) satisfies string}`);
+        }
+        return null;
+      };
+
+      const results: string[] = [];
+
+      render(
+        <EffectProvider
+          layer={Layer.empty}
+          storeConfig={{ refetchOnWindowFocus: true, staleTime: 0 }}
+        >
+          <QueryConsumer
+            onResult={(v) => {
+              results.push(v);
+            }}
+          />
+        </EffectProvider>,
+      );
+
+      await vi.waitFor(() => {
+        expect(results).toContain("Success:1");
+      });
+
+      expect(callCount).toBe(1);
+
+      // Simulate window focus event
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+
+      await vi.waitFor(() => {
+        expect(results).toContain("Success:2");
+      });
+    });
+
+    it("cleans up event listeners on unmount", async () => {
+      const addSpy = vi.spyOn(window, "addEventListener");
+      const removeSpy = vi.spyOn(window, "removeEventListener");
+      const docAddSpy = vi.spyOn(document, "addEventListener");
+      const docRemoveSpy = vi.spyOn(document, "removeEventListener");
+
+      const { unmount } = render(
+        <EffectProvider
+          layer={Layer.empty}
+          storeConfig={{ refetchOnWindowFocus: true, staleTime: 0 }}
+        >
+          <div />
+        </EffectProvider>,
+      );
+
+      // Wait for provider to initialize
+      await vi.waitFor(() => {
+        expect(addSpy.mock.calls.some(([event]) => event === "focus")).toBe(
+          true,
+        );
+      });
+
+      expect(
+        docAddSpy.mock.calls.some(([event]) => event === "visibilitychange"),
+      ).toBe(true);
+
+      unmount();
+
+      expect(removeSpy.mock.calls.some(([event]) => event === "focus")).toBe(
+        true,
+      );
+      expect(
+        docRemoveSpy.mock.calls.some(([event]) => event === "visibilitychange"),
+      ).toBe(true);
+
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
+      docAddSpy.mockRestore();
+      docRemoveSpy.mockRestore();
+    });
+
+    it("does not subscribe to events when refetchOnWindowFocus is not set", async () => {
+      const addSpy = vi.spyOn(window, "addEventListener");
+
+      const { unmount } = render(
+        <EffectProvider layer={Layer.empty}>
+          <div />
+        </EffectProvider>,
+      );
+
+      // Wait for provider to initialize
+      await vi.waitFor(() => {
+        // Provider should be rendered
+        expect(true).toBe(true);
+      });
+
+      // Give time for any async initialization
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      const focusCalls = addSpy.mock.calls.filter(
+        ([event]) => event === "focus",
+      );
+      expect(focusCalls.length).toBe(0);
+
+      unmount();
+      addSpy.mockRestore();
     });
   });
 });

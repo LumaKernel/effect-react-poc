@@ -825,6 +825,126 @@ describe("EffectStore", () => {
     });
   });
 
+  describe("notifyFocus", () => {
+    it("invalidates stale entries with subscribers when refetchOnWindowFocus is true", async () => {
+      const { store, runtime } = createTestStore({
+        refetchOnWindowFocus: true,
+        staleTime: 0, // always stale
+      });
+      let callCount = 0;
+      const effect = Effect.sync(() => {
+        callCount++;
+        return callCount;
+      });
+
+      store.subscribe("key", () => {});
+      store.run("key", effect);
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success(1));
+      });
+
+      store.notifyFocus();
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success(2));
+      });
+
+      await runtime.dispose();
+    });
+
+    it("does not invalidate fresh entries (within staleTime)", async () => {
+      const { store, runtime } = createTestStore({
+        refetchOnWindowFocus: true,
+        staleTime: 60_000, // 60 seconds = fresh for a long time
+      });
+      let callCount = 0;
+      const effect = Effect.sync(() => {
+        callCount++;
+        return callCount;
+      });
+
+      store.subscribe("key", () => {});
+      store.run("key", effect);
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success(1));
+      });
+
+      store.notifyFocus();
+
+      // Wait briefly to ensure no re-fetch happens
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+
+      expect(store.getSnapshot("key")).toEqual(success(1));
+      expect(callCount).toBe(1);
+
+      await runtime.dispose();
+    });
+
+    it("does not invalidate entries without subscribers", async () => {
+      const { store, runtime } = createTestStore({
+        refetchOnWindowFocus: true,
+        staleTime: 0,
+      });
+      let callCount = 0;
+      const effect = Effect.sync(() => {
+        callCount++;
+        return callCount;
+      });
+
+      // Run without subscribing
+      store.run("key", effect);
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success(1));
+      });
+
+      store.notifyFocus();
+
+      // Wait briefly to ensure no re-fetch
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+
+      expect(callCount).toBe(1);
+
+      await runtime.dispose();
+    });
+
+    it("is a no-op when refetchOnWindowFocus is false (default)", async () => {
+      const { store, runtime } = createTestStore({
+        staleTime: 0,
+      });
+      let callCount = 0;
+      const effect = Effect.sync(() => {
+        callCount++;
+        return callCount;
+      });
+
+      store.subscribe("key", () => {});
+      store.run("key", effect);
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("key")).toEqual(success(1));
+      });
+
+      store.notifyFocus();
+
+      // Wait briefly to ensure no re-fetch
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+
+      expect(callCount).toBe(1);
+      expect(store.getSnapshot("key")).toEqual(success(1));
+
+      await runtime.dispose();
+    });
+  });
+
   describe("dispose", () => {
     it("interrupts all running fibers", async () => {
       const { store, runtime } = createTestStore();

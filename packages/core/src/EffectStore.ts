@@ -44,6 +44,12 @@ export interface EffectStoreConfig {
    * Set to 0 for "always stale" (always re-fetch). Default: 0.
    */
   readonly staleTime: number;
+
+  /**
+   * When true, `notifyFocus()` will invalidate all stale entries that have
+   * active subscribers. Default: false.
+   */
+  readonly refetchOnWindowFocus: boolean;
 }
 
 // eslint-disable-next-line luma-ts/no-date -- Temporal API not yet available in target runtimes
@@ -52,6 +58,7 @@ const getNow = (): number => Date.now();
 const defaultEffectStoreConfig: EffectStoreConfig = {
   gcTime: 30_000,
   staleTime: 0,
+  refetchOnWindowFocus: false,
 };
 
 /**
@@ -142,6 +149,14 @@ export interface EffectStore {
    * Get the current snapshot for a key.
    */
   readonly getSnapshot: <A, E>(key: string) => EffectResult<A, E>;
+
+  /**
+   * Notify the store that the window has regained focus.
+   * If `refetchOnWindowFocus` is enabled, invalidates all stale entries
+   * that have active subscribers (subscriberCount > 0).
+   * No-op if `refetchOnWindowFocus` is false.
+   */
+  readonly notifyFocus: () => void;
 
   /**
    * Dispose the store: interrupt all running fibers and clear all entries.
@@ -424,6 +439,21 @@ export const createEffectStore = (
         return initial as EffectResult<A, E>;
       }
       return entry.subscribable.getSnapshot() as EffectResult<A, E>;
+    },
+
+    notifyFocus: (): void => {
+      if (!resolvedConfig.refetchOnWindowFocus) {
+        return;
+      }
+      const keys = [...entries.keys()];
+      for (const key of keys) {
+        const entry = entries.get(key);
+        if (entry && entry.subscriberCount > 0 && entry.effect) {
+          if (store.isStale(key)) {
+            runEffect(key, entry.effect);
+          }
+        }
+      }
     },
 
     dispose: Effect.gen(function* () {

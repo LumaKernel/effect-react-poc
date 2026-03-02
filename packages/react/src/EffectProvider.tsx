@@ -137,6 +137,30 @@ export const EffectProvider = <R, E>({
     };
   }, [mergedLayer, storeConfig]);
 
+  // Window focus refetch: subscribe to visibilitychange and focus events
+  useEffect(() => {
+    if (!state) {
+      return;
+    }
+    if (!storeConfig?.refetchOnWindowFocus) {
+      return;
+    }
+    const handleFocus = (): void => {
+      state.store.notifyFocus();
+    };
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === "visible") {
+        state.store.notifyFocus();
+      }
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [state, storeConfig?.refetchOnWindowFocus]);
+
   if (state === null) {
     return null;
   }
