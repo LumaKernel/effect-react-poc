@@ -1,9 +1,9 @@
 import { useMemo, useRef, useSyncExternalStore } from "react";
 import type { Cause, Effect } from "effect";
 import type { EffectResult } from "@effect-react/core";
-import { createEffectObserver } from "@effect-react/core";
+import { createEffectObserver, initial } from "@effect-react/core";
 import type { Subscribable } from "@effect-react/core";
-import { useEffectStore } from "./EffectProvider.js";
+import { useEffectStoreNullable } from "./EffectProvider.js";
 
 /**
  * Error thrown by useEffectSuspense when the Effect fails.
@@ -58,12 +58,25 @@ const createSuspensePromise = <A, E>(
   });
 
 /**
+ * Returns `initial` as the server snapshot for SSR.
+ * Used as `getServerSnapshot` in `useSyncExternalStore`.
+ */
+const getServerSnapshot = (): EffectResult<never, never> => initial;
+
+/* v8 ignore next 5 -- SSR-only: useSyncExternalStore does not call subscribe during renderToString */
+const noop = (): void => {};
+
+/** No-op subscribe for SSR (store not yet available). */
+const noopSubscribe = (_callback: () => void): (() => void) => noop;
+
+/**
  * React hook that executes an Effect with Suspense integration.
  *
  * - Uses `useSyncExternalStore` to subscribe to an EffectObserver
  * - Throws a cached Promise during Initial/Pending (triggers Suspense fallback)
  * - Throws an `EffectError<E>` during Failure (triggers ErrorBoundary)
  * - Returns the value `A` directly during Success/Refreshing
+ * - SSR: returns `initial` via `getServerSnapshot`, triggering Suspense fallback on server
  *
  * The thrown Promise subscribes to the observer independently of React's
  * render cycle, ensuring it resolves even while the component is suspended.
@@ -80,15 +93,18 @@ export const useEffectSuspense = <A, E>(
   key: string,
   effect: Effect.Effect<A, E>,
 ): A => {
-  const store = useEffectStore();
+  const store = useEffectStoreNullable();
 
   const effectRef = useRef(effect);
   effectRef.current = effect;
 
-  const observer = useMemo(
-    () => createEffectObserver<A, E>(store, key, effectRef.current),
-    [store, key],
-  );
+  // During SSR (store === null), observer is null and getServerSnapshot handles it.
+  const observer = useMemo(() => {
+    if (store === null) {
+      return null;
+    }
+    return createEffectObserver<A, E>(store, key, effectRef.current);
+  }, [store, key]);
 
   const suspenseState = useRef<SuspenseState<A, E>>({
     promise: null,
@@ -101,16 +117,28 @@ export const useEffectSuspense = <A, E>(
     suspenseState.current.observer = observer;
   }
 
-  const result = useSyncExternalStore(observer.subscribe, observer.getSnapshot);
+  const subscribe = observer?.subscribe ?? noopSubscribe;
+  const getSnapshot = observer?.getSnapshot ?? getServerSnapshot;
+
+  const result = useSyncExternalStore(
+    subscribe,
+    getSnapshot,
+    getServerSnapshot,
+  );
 
   switch (result._tag) {
     case "Initial":
     case "Pending": {
-      if (suspenseState.current.promise === null) {
+      if (suspenseState.current.promise === null && observer !== null) {
         suspenseState.current.promise = createSuspensePromise(observer);
       }
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      throw suspenseState.current.promise;
+      if (suspenseState.current.promise !== null) {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw suspenseState.current.promise;
+      }
+      // SSR path: observer is null, no promise to throw.
+      // Return undefined cast as A — the Suspense boundary renders this output on server.
+      return undefined as A;
     }
     case "Failure": {
       throw new EffectError<E>(result.cause);

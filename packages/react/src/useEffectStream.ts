@@ -9,7 +9,7 @@ import {
   success,
 } from "@effect-react/core";
 import type { EffectManagedRuntime } from "./EffectProvider.js";
-import { useEffectRuntime } from "./EffectProvider.js";
+import { useEffectRuntimeNullable } from "./EffectProvider.js";
 
 /**
  * Result of `useEffectStream`.
@@ -80,6 +80,17 @@ const startStream = <A, E>(
 };
 
 /**
+ * Returns `initial` as the server snapshot for SSR.
+ */
+const getServerSnapshot = (): EffectResult<never, never> => initial;
+
+/* v8 ignore next 5 -- SSR-only: useSyncExternalStore does not call subscribe during renderToString */
+const noop = (): void => {};
+
+/** No-op subscribe for SSR (runtime not yet available). */
+const noopSubscribe = (_callback: () => void): (() => void) => noop;
+
+/**
  * React hook that subscribes to an Effect Stream and returns the latest emitted value.
  *
  * - Uses `useSyncExternalStore` to subscribe to a Subscribable
@@ -88,6 +99,7 @@ const startStream = <A, E>(
  * - Interrupts the stream on unmount or when the stream reference changes
  * - Backpressure: pull-based consumption via `runForEach` means the stream
  *   advances only as fast as the consumer processes each value
+ * - SSR: returns `initial` via `getServerSnapshot` (no stream consumption on server)
  *
  * State transitions:
  * - `Initial` → `Pending` (stream started)
@@ -106,7 +118,7 @@ export const useEffectStream = <A, E>(
   stream: Stream.Stream<A, E>,
 ): StreamResult<A, E> => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const runtime = useEffectRuntime<any, any>();
+  const runtime = useEffectRuntimeNullable<any, any>();
 
   const streamRef = useRef(stream);
   streamRef.current = stream;
@@ -120,8 +132,14 @@ export const useEffectStream = <A, E>(
     [runtime],
   );
 
-  // Start the stream on mount and restart when stream reference changes
+  // Start the stream on mount and restart when stream reference changes.
+  // During SSR, useEffect does not run. On client, EffectProvider gates children
+  // rendering until runtime is ready, so this guard is defensive-only.
   useEffect(() => {
+    /* v8 ignore next 3 -- defensive: unreachable while EffectProvider gates children */
+    if (runtime === null) {
+      return;
+    }
     startStream(runtime, internals, streamRef.current);
 
     return () => {
@@ -129,9 +147,15 @@ export const useEffectStream = <A, E>(
     };
   }, [runtime, internals]);
 
+  const subscribe =
+    runtime !== null ? internals.subscribable.subscribe : noopSubscribe;
+  const getSnapshot =
+    runtime !== null ? internals.subscribable.getSnapshot : getServerSnapshot;
+
   const result = useSyncExternalStore(
-    internals.subscribable.subscribe,
-    internals.subscribable.getSnapshot,
+    subscribe,
+    getSnapshot,
+    getServerSnapshot,
   );
 
   return { result };

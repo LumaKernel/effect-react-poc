@@ -76,6 +76,28 @@ export const useEffectStore = (): EffectStore => {
 };
 
 /**
+ * Internal hook: retrieve the EffectStore, or null if not yet initialized (SSR).
+ * Used by hooks that need SSR support via getServerSnapshot.
+ *
+ * When modifying: also check useEffectQuery, useEffectSuspense.
+ */
+export const useEffectStoreNullable = (): EffectStore | null =>
+  useContext(EffectStoreContext);
+
+/**
+ * Internal hook: retrieve the runtime, or null if not yet initialized (SSR).
+ * Used by hooks that need SSR support via getServerSnapshot.
+ *
+ * When modifying: also check useEffectStream, useEffectMutation.
+ */
+export const useEffectRuntimeNullable = <R, E>(): EffectManagedRuntime<
+  R,
+  E
+> | null => {
+  return useContext(EffectRuntimeContext);
+};
+
+/**
  * Props for EffectProvider.
  *
  * When adding a new prop:
@@ -161,14 +183,18 @@ export const EffectProvider = <R, E>({
     };
   }, [state, storeConfig?.refetchOnWindowFocus]);
 
-  if (state === null) {
+  // SSR: render children with null contexts so hooks can use getServerSnapshot.
+  // Client: wait for runtime initialization before rendering children.
+  const isSSR = typeof window === "undefined";
+
+  if (state === null && !isSSR) {
     return null;
   }
 
   return (
     <EffectLayerContext.Provider value={mergedLayer}>
-      <EffectRuntimeContext.Provider value={state.runtime}>
-        <EffectStoreContext.Provider value={state.store}>
+      <EffectRuntimeContext.Provider value={state?.runtime ?? null}>
+        <EffectStoreContext.Provider value={state?.store ?? null}>
           {children}
         </EffectStoreContext.Provider>
       </EffectRuntimeContext.Provider>

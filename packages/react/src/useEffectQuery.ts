@@ -1,8 +1,8 @@
 import { useMemo, useRef, useSyncExternalStore } from "react";
 import type { Effect, Schedule } from "effect";
 import type { EffectResult } from "@effect-react/core";
-import { createEffectObserver } from "@effect-react/core";
-import { useEffectStore } from "./EffectProvider.js";
+import { createEffectObserver, initial } from "@effect-react/core";
+import { useEffectStoreNullable } from "./EffectProvider.js";
 
 /**
  * Options for `useEffectQuery`.
@@ -26,6 +26,18 @@ export interface UseEffectQueryOptions<E> {
 }
 
 /**
+ * Returns `initial` as the server snapshot for SSR.
+ * Used as `getServerSnapshot` in `useSyncExternalStore`.
+ */
+const getServerSnapshot = (): EffectResult<never, never> => initial;
+
+/* v8 ignore next 5 -- SSR-only: useSyncExternalStore does not call subscribe during renderToString */
+const noop = (): void => {};
+
+/** No-op subscribe for SSR (store not yet available). */
+const noopSubscribe = (_callback: () => void): (() => void) => noop;
+
+/**
  * React hook that executes an Effect and subscribes to its result.
  *
  * - Uses `useSyncExternalStore` to subscribe to an EffectObserver
@@ -34,6 +46,7 @@ export interface UseEffectQueryOptions<E> {
  * - Re-executes when `key` changes
  * - Shares cache across components using the same key (via EffectStore)
  * - Optionally accepts a schedule for retry policy
+ * - SSR: returns `initial` via `getServerSnapshot` (no Effect execution on server)
  *
  * When modifying this hook:
  * - Update tests in `packages/react/tests/useEffectQuery.test.tsx`
@@ -49,7 +62,7 @@ export const useEffectQuery = <A, E>(
   effect: Effect.Effect<A, E>,
   options?: UseEffectQueryOptions<E>,
 ): EffectResult<A, E> => {
-  const store = useEffectStore();
+  const store = useEffectStoreNullable();
 
   // Keep a stable reference to the effect to avoid re-creating the observer
   // on every render when the caller creates the effect inline.
@@ -67,7 +80,11 @@ export const useEffectQuery = <A, E>(
   // Create the observer, memoized by store + key.
   // When key changes, a new observer is created and the old one is unsubscribed
   // (via useSyncExternalStore's cleanup).
+  // During SSR (store === null), observer is null and getServerSnapshot handles it.
   const observer = useMemo(() => {
+    if (store === null) {
+      return null;
+    }
     const schedule = scheduleRef.current;
     const tags = tagsRef.current;
     const observerOptions =
@@ -85,5 +102,8 @@ export const useEffectQuery = <A, E>(
     );
   }, [store, key]);
 
-  return useSyncExternalStore(observer.subscribe, observer.getSnapshot);
+  const subscribe = observer?.subscribe ?? noopSubscribe;
+  const getSnapshot = observer?.getSnapshot ?? getServerSnapshot;
+
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 };
