@@ -26,6 +26,7 @@
 - Stream テスト: `createControllableStream` ヘルパーで `emit/end/fail` を外部制御（`Stream.async` の Emit API を型安全にラップ）
 - useEffectScope: `Effect.runSync` で Scope 操作（ManagedRuntime 不要）。`useEffect` 内でScope作成・close
 - EffectBoundary: Suspense + ErrorBoundary 統合。`renderError` 未指定時はエラー伝搬。非 EffectError は常に親に伝搬
+- EffectValue: React.memo + useRef で render prop の関数参照を安定化。effect も ref 化して memo 境界を維持
 
 ## 2026-03-03 - 初期セットアップ
 - 実装した内容:
@@ -299,4 +300,24 @@
   - ErrorBoundary の re-throw: `getDerivedStateFromError` でキャッチしたエラーを render で re-throw すると親の ErrorBoundary に伝搬する。`@typescript-eslint/only-throw-error` の eslint-disable が必要（型が unknown のため）
   - EffectBoundary は Suspense と ErrorBoundary を組み合わせるため、ErrorBoundary が Suspense の外側にある必要がある（ErrorBoundary > Suspense > children の順序）
   - ネストされた Suspense テストでは、外側の Suspense が全子要素をブロックするため、外側のコンポーネントを同期 Effect にする必要がある
+---
+
+## 2026-03-03 - EffectValue コンポーネント実装 (タスク 2.8)
+- 実装した内容:
+  - `EffectValue<A, E>` コンポーネント: Legend State の `<Memo>` に触発された細粒度リアクティビティコンポーネント
+  - `React.memo` でラップされた内部コンポーネント `EffectValueInner` が Effect 購読を保持
+  - `useRef` で `effect` と `children` (render prop) を安定化し、親の再レンダーで memo 境界を突破しない設計
+  - 内部で `useEffectQuery` を使用し、EffectStore のキャッシュを共有
+  - `queryKey` 変更時のみ内部コンポーネントが再レンダー（props 経由）
+  - 7テスト（親非再レンダー検証、子再レンダー検証、ライフサイクル状態遷移、Failure、キャッシュ共有、無関係親state変更での非再レンダー、StrictMode）
+- 変更したファイル:
+  - packages/react/src/EffectValue.tsx (新規)
+  - packages/react/src/index.ts (re-export追加)
+  - packages/react/tests/EffectValue.test.tsx (新規)
+  - tasks/02-react-integration.md (タスク2.8を完了マーク)
+- カバレッジ: 100% → 100% (EffectValue.tsx 100%)
+- **今後のイテレーションへの学び:**
+  - `React.memo` は props の浅い比較をするため、render prop (children関数) や毎回新規作成されるオブジェクト (Effect.succeed等) は memo を破る。`useRef` で参照を安定化し、ref オブジェクトを props として渡すことで memo 境界を維持する
+  - テストで `data-testid` が複数テスト間で衝突することがある（Testing Library の cleanup が不完全な場合）。ユニークな testId を使うのが安全
+  - 細粒度リアクティビティの核心は「外部コンポーネント (EffectValue) で ref を更新し、内部 memoized コンポーネント (EffectValueInner) で useSyncExternalStore 経由のみで再レンダーされる」パターン
 ---

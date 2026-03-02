@@ -28,3 +28,7 @@ export { useEffectScope } from "./useEffectScope.js";
 export type { EffectBoundaryProps } from "./EffectBoundary.js";
 
 export { EffectBoundary } from "./EffectBoundary.js";
+
+export type { EffectValueProps } from "./EffectValue.js";
+
+export { EffectValue } from "./EffectValue.js";
