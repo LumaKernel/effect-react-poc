@@ -42,6 +42,34 @@
 - SSR テスト: `@vitest-environment node` + `renderToString` で実 SSR パスを検証。jsdom テストとは別ファイル
 - CI: GitHub Actions `.github/workflows/ci.yml` で typecheck → lint → test (coverage) を実行。push/PR on main でトリガー
 - SubscriptionRef カウンター: `useEffectRuntime<R, E>()` + `runtime.runFork` + `createSubscribable` + `useSyncExternalStore` パターン（フックの R 型制約を回避）
+- Schema.TaggedClass: `Schema.TaggedClass<T>()("Tag", { fields })` で型定義。class instance spread 禁止（手動プロパティ指定）
+- Layer合成: `ServiceLive.pipe(Layer.provide(DependencyLive))` で依存注入
+
+## 2026-03-03 - todo-app example (タスク 4.3)
+- 実装した内容:
+  - examples/todo-app: CRUD操作を持つTodoアプリケーション
+  - TodoSchema: Schema.TaggedClass でTodo型定義（id, title, completed）
+  - TodoService: Context.Tag + Layer.effect で SubscriptionRef<ReadonlyArray<Todo>> を管理
+  - Storage: 抽象StorageServiceインターフェース + BrowserStorageLive（localStorage）+ createInMemoryStorage（テスト用）
+  - TodosLive: Storage依存のLayer（Layer.provide でStorage → Todosを合成）
+  - useTodoList: useEffectRuntime + Stream.runForEach + createSubscribable + useSyncExternalStore パターン
+  - useTodoActions: useEffectRuntime + runtime.runFork で add/toggle/remove アクション
+  - TodoForm: フォームでTodo追加
+  - TodoItem: 個別Todo表示（チェックボックスでtoggle、Deleteボタンでremove）
+  - TodoList: useTodoListでリアクティブ一覧表示
+  - tsconfig.json に examples/todo-app のプロジェクト参照追加
+- 変更したファイル:
+  - examples/todo-app/ (新規: package.json, tsconfig.json, vite.config.ts, index.html, src/*.tsx, src/*.ts)
+  - tsconfig.json (examples/todo-app 参照追加)
+  - pnpm-lock.yaml (workspace依存追加)
+- カバレッジ: 100% → 100% (変化なし、examples はカバレッジ対象外)
+- **今後のイテレーションへの学び:**
+  - Schema.TaggedClass の最新API: `Schema.TaggedClass<ClassName>()("Tag", { fields })` パターン（空括弧 `()` が必要）
+  - class instance に対する spread (`{...todo}`) は `@typescript-eslint/no-misused-spread` でエラー。手動でプロパティを指定する: `new Todo({ id: todo.id, title: todo.title, completed: !todo.completed })`
+  - `React.FormEvent` は非推奨。`React.SyntheticEvent` を使用する
+  - Layer.pipe(Layer.provide(dependency)) パターンで依存Layerを合成: `TodosLive.pipe(Layer.provide(BrowserStorageLive))`
+  - Schema.encodeSync / Schema.decodeUnknownSync で JSON シリアライゼーション/デシリアライゼーションが型安全に行える
+---
 
 ## 2026-03-03 - counter example (タスク 4.2)
 - 実装した内容:

@@ -26,6 +26,7 @@
     { "path": "packages/react/tsconfig.test.json" },
     { "path": "examples/hello-world" },
     { "path": "examples/counter" },
+    { "path": "examples/todo-app" },
     { "path": "tsconfig.node.json" }
   ],
   "files": []
