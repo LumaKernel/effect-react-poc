@@ -47,3 +47,21 @@
 - [x] useEffectStream での逐次表示
 
 **示す概念**: Stream、ページネーション、無限スクロール
+
+### 4.6 real-time-chat: WebSocket
+
+- [x] WebSocket接続をEffect.async + Stream.asyncで抽象化
+- [x] PubSub でメッセージ配信
+- [x] 接続切断 → 自動再接続（Schedule.exponential）
+- [x] Effect.acquireRelease でWebSocketのライフサイクル管理
+
+**示す概念**: Stream、PubSub、リソース管理、リトライ、非同期I/O
+
+### 4.7 parallel-requests: 並行リクエスト
+
+- [x] 複数APIを並行フェッチ（Effect.all { concurrency: "unbounded" }）
+- [x] 一つが失敗しても他は続行（Effect.allSettled相当）
+- [x] Race condition: 最初に返ったものを使用（Effect.race）
+- [x] セマフォで並行数制限（Effect.makeSemaphore）
+
+**示す概念**: 構造化並行性、セマフォ、race
