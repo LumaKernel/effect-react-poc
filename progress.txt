@@ -54,3 +54,20 @@
   - `Data.struct` はシンプルなオブジェクトに構造的等値性を付与。`Data.TaggedEnum` はジェネリック版では `$is`/`$match` が使えないため、手動定義の方が柔軟
   - Effect.ts の動的 import はvitest のタイムアウト (5s) を超えうる。static import を使用すべき
 ---
+
+## 2026-03-03 - Subscribable インターフェース (タスク 1.3)
+- 実装した内容:
+  - `Subscribable<A>` インターフェース (`useSyncExternalStore` 互換: `subscribe` + `getSnapshot`)
+  - `MutableSubscribable<A>` インターフェース (`Subscribable<A>` + `set`)
+  - `createSubscribable<A>` ファクトリ関数 (参照等価性チェック付き)
+  - 14テスト (subscribe/unsubscribe、参照等価性 Object.is、NaN/±0 エッジケース、複数subscriber、ダブルunsubscribe)
+- 変更したファイル:
+  - packages/core/src/Subscribable.ts (新規)
+  - packages/core/src/index.ts (re-export追加)
+  - packages/core/tests/Subscribable.test.ts (新規)
+- カバレッジ: 100% → 100% (Subscribable.ts 100%)
+- **今後のイテレーションへの学び:**
+  - `Subscribable` は React 非依存で、`useSyncExternalStore` の `subscribe` + `getSnapshot` と同じシグネチャ
+  - `Object.is` は `===` と異なり NaN === NaN (true)、+0 === -0 (false) を区別する
+  - `Set<() => void>` で listener 管理すると、同じ関数の二重登録を防ぎつつ O(1) の追加・削除が可能
+---

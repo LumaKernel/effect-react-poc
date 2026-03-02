@@ -22,3 +22,7 @@ export {
   hasValue,
   getValue,
 } from "./EffectResult.js";
+
+export type { Subscribable, MutableSubscribable } from "./Subscribable.js";
+
+export { createSubscribable } from "./Subscribable.js";

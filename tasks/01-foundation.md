@@ -15,56 +15,6 @@
 
 ## タスク
 
-### 1.1 プロジェクトセットアップ
-
-- [ ] pnpmワークスペース + モノレポ構成
-  - `packages/core/`, `packages/react/`, `examples/`
-  - TypeScript strict mode, ESM, Effect.ts最新版
-  - vitest設定、カバレッジ設定
-  - biome (lint/format)
-  - `effect ^3.16` (最新stable)
-
-**テスト計画**: セットアップ自体のテストはなし。`vitest --run` が正常終了することを確認。
-
-### 1.2 EffectResult 型定義
-
-- [x] `EffectResult<A, E>` discriminated union
-  ```typescript
-  type EffectResult<A, E> =
-    | { readonly _tag: "Initial" }
-    | { readonly _tag: "Pending"; readonly promise: Promise<void> }
-    | { readonly _tag: "Success"; readonly value: A }
-    | { readonly _tag: "Failure"; readonly cause: Cause<E> }
-    | { readonly _tag: "Refreshing"; readonly value: A; readonly promise: Promise<void> }
-  ```
-- [x] exhaustive matchヘルパー
-- [x] `Schema.TaggedClass` または `Data.TaggedClass` での定義検討
-
-**テスト計画**:
-- 各状態の生成と型ガード関数のテスト
-- exhaustive matchで全分岐をカバー
-- `Data.struct`による構造的等値性テスト
-
-**変更時に一緒にすべきこと**: `EffectResult`の状態を追加する場合、exhaustive checkが全消費箇所でコンパイルエラーになることを確認。
-
-### 1.3 Subscribable インターフェース
-
-- [ ] `useSyncExternalStore`互換の購読インターフェース
-  ```typescript
-  interface Subscribable<A> {
-    readonly subscribe: (callback: () => void) => () => void
-    readonly getSnapshot: () => A
-  }
-  ```
-- [ ] 参照等価性の保証（値が変わらなければ同じオブジェクト参照）
-
-**テスト計画**:
-- subscribe/unsubscribeの正常動作
-- 値変更時のコールバック呼び出し
-- 値未変更時のスナップショット参照等価性（`Object.is`）
-- 複数subscriberの独立性
-- unsubscribe後のコールバック非呼び出し
-
 ### 1.4 EffectStore コア実装
 
 - [ ] Effect実行結果のキャッシュ管理
