@@ -4,5 +4,9 @@
     "composite": true,
     "noEmit": true
   },
-  "include": ["vitest.config.ts", "eslint.config.js"]
+  "include": [
+    "vitest.config.ts",
+    "eslint.config.js",
+    "examples/*/vite.config.ts"
+  ]
 }

@@ -42,6 +42,27 @@
 - SSR テスト: `@vitest-environment node` + `renderToString` で実 SSR パスを検証。jsdom テストとは別ファイル
 - CI: GitHub Actions `.github/workflows/ci.yml` で typecheck → lint → test (coverage) を実行。push/PR on main でトリガー
 
+## 2026-03-03 - hello-world example (タスク 4.1)
+- 実装した内容:
+  - examples/hello-world: Vite + React の最小構成例
+  - EffectProvider + Layer.empty の基本設定
+  - QueryExample: useEffectQuery + matchEffectResult の使用例
+  - SuspenseExample: useEffectSuspense + EffectBoundary の使用例
+  - tsconfig.json にexamples/hello-world のプロジェクト参照追加
+  - tsconfig.node.json に examples/*/vite.config.ts を追加
+- 変更したファイル:
+  - examples/hello-world/ (新規: package.json, tsconfig.json, vite.config.ts, index.html, src/*.tsx)
+  - tsconfig.json (examples/hello-world 参照追加)
+  - tsconfig.node.json (examples/*/vite.config.ts 追加)
+  - pnpm-lock.yaml (vite, @vitejs/plugin-react 追加)
+- カバレッジ: 100% → 100% (変化なし)
+- **今後のイテレーションへの学び:**
+  - examples の vite.config.ts は tsconfig.node.json の include に追加する必要がある（ESLint projectService がパースするため）
+  - matchEffectResult の handler キーは PascalCase（`Initial`, `Success` 等）。handler引数はオブジェクト全体（`Success<A>`）なので destructure が必要
+  - examples は vitest のテスト対象外。品質基準は `pnpm typecheck` + `pnpm --filter <name> build` が通ること
+  - 新しい example を追加する際は: 1) tsconfig.json に reference 追加、2) pnpm install、3) eslint/prettier チェック
+---
+
 ## 2026-03-03 - CI セットアップ (タスク 6.1)
 - 実装した内容:
   - `.github/workflows/ci.yml` 作成

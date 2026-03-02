@@ -24,6 +24,7 @@
     { "path": "packages/core/tsconfig.test.json" },
     { "path": "packages/react" },
     { "path": "packages/react/tsconfig.test.json" },
+    { "path": "examples/hello-world" },
     { "path": "tsconfig.node.json" }
   ],
   "files": []
