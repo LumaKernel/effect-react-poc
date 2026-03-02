@@ -20,6 +20,8 @@
 - Suspense フック: Promise を observer に自己購読させてサスペンド中でも resolve する。`EffectError<E>` で ErrorBoundary にキャッチ
 - `Error` サブクラスの `cause` プロパティは ES2022 `Error.cause` と衝突するため `override` 必須
 - React `Component` サブクラスの `render()` も `override` 必須（TypeScript strict + noImplicitOverride）
+- useEffectMutation: runtime 直接利用 + `createSubscribable` でコンポーネントローカル管理。EffectStore 不使用
+- mutation の observer fiber は直接キャンセル不要。mutation fiber interrupt → Fiber.await が Interrupt exit → ガードで無視
 
 ## 2026-03-03 - 初期セットアップ
 - 実装した内容:
@@ -201,4 +203,27 @@
   - `act(() => { ... })` は同期関数を渡す場合 `await` 不要。`async` ラッパーは ESLint `@typescript-eslint/require-await` エラーになる
   - テストで配列の要素にアクセスする場合 `arr[0]` は `T | undefined` になる（`noUncheckedIndexedAccess`）→ ガード文が必要
   - カバレッジ100%を達成するために、防御的なコードパス（到達不可能な分岐）は削除するか、到達可能にする設計に変更する
+---
+
+## 2026-03-03 - useEffectMutation フック実装 (タスク 2.4)
+- 実装した内容:
+  - `useEffectMutation<I, A, E>` フック: 手動トリガー型の Effect 実行
+  - `MutationState<I, A, E>` インターフェース: `result`, `mutate(input)`, `reset()` を提供
+  - EffectStore を使わず、`useEffectRuntime` + `createSubscribable` でコンポーネントローカルな状態管理
+  - EffectResult を再利用: Initial = idle, Pending = pending, Success = success, Failure = failure
+  - `mutate(input)` で Effect を生成・実行、前の mutation fiber を自動キャンセル
+  - `reset()` で状態を Initial に戻し、実行中 fiber をキャンセル
+  - unmount 時の cleanup（実行中 fiber の interrupt）
+  - 11テスト（idle状態、sync/async遷移、Failure、引数付きmutate、reset、reset中キャンセル、連続mutateキャンセル、unmount cleanup、StrictMode互換）
+- 変更したファイル:
+  - packages/react/src/useEffectMutation.ts (新規)
+  - packages/react/src/index.ts (re-export追加)
+  - packages/react/tests/useEffectMutation.test.tsx (新規)
+  - tasks/02-react-integration.md (タスク2.4を完了マーク)
+- カバレッジ: 100% → 100% (useEffectMutation.ts 100%)
+- **今後のイテレーションへの学び:**
+  - mutation フックは EffectStore を経由せず runtime 直接利用が適切。EffectStore はクエリのキャッシュ共有用で、mutation はコンポーネントローカル
+  - `MutationInternals` の `subscribable.set` が contravariant なため、ジェネリック関数に `MutationInternals<unknown, unknown>` を渡すと型エラー。`Pick<..., "fiber">` で必要なフィールドのみを受け取るか、別インターフェースに分離する
+  - observer fiber は mutation fiber の `Fiber.await` 結果を待つだけなので、直接キャンセルする必要はない。mutation fiber をinterruptすれば observer は Interrupt exit を受け取り、`internals.fiber !== fiber` ガードで安全に無視される（EffectStore と同じパターン）
+  - `_input: void` は ESLint `@typescript-eslint/no-invalid-void-type` エラー → `_input: undefined` を使用
 ---
