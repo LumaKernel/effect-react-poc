@@ -37,6 +37,36 @@
 - useEffectMutation: `MutationOptions.onMutate` が `OptimisticRollback` を返すと失敗時に自動ロールバック
 - EffectStore tags: `RunOptions.tags` でエントリにタグ付け。`invalidateByTags(tags)` / `QueryFilter { type: "tags" }` でタグベース無効化
 - useEffectMutation: `MutationOptions.invalidateTags` で成功時に関連クエリを自動再フェッチ
+- SSR: `getServerSnapshot` は全フックでモジュールレベル定数（`() => initial`）。`noopSubscribe` も同様
+- SSR: EffectProvider は `typeof window === "undefined"` で SSR 判定。SSR 時は null context で children をレンダー
+- SSR テスト: `@vitest-environment node` + `renderToString` で実 SSR パスを検証。jsdom テストとは別ファイル
+
+## 2026-03-03 - SSR対応・getServerSnapshot実装 (タスク 3.6 部分)
+- 実装した内容:
+  - 全4フック（useEffectQuery, useEffectSuspense, useEffectStream, useEffectMutation）に `getServerSnapshot` を追加
+  - `useSyncExternalStore` の第3引数に `getServerSnapshot` を渡し、SSR（renderToString）で `initial` を返す
+  - EffectProvider: SSR時（typeof window === "undefined"）に children をレンダリングするよう変更
+  - `useEffectRuntimeNullable` / `useEffectStoreNullable` 内部フック追加（SSR時は null を返す）
+  - SSR パスではモジュールレベルの `noopSubscribe` / `getServerSnapshot` を使用
+  - useEffectMutation: SSR時に mutate/reset が no-op
+  - useEffectSuspense: SSR時に Promise を throw せず `undefined as A` を返す
+  - 5 SSRテスト追加（@vitest-environment node、renderToString による実SSRテスト）
+  - 合計227テスト（222→227）、カバレッジ100%維持
+- 変更したファイル:
+  - packages/react/src/EffectProvider.tsx (SSR判定、nullable hooks、children レンダリング)
+  - packages/react/src/useEffectQuery.ts (getServerSnapshot、nullable store)
+  - packages/react/src/useEffectSuspense.ts (getServerSnapshot、nullable store、SSR fallback)
+  - packages/react/src/useEffectStream.ts (getServerSnapshot、nullable runtime)
+  - packages/react/src/useEffectMutation.ts (getServerSnapshot、nullable runtime/store)
+  - packages/react/tests/ssr.test.tsx (新規: 5テスト)
+- カバレッジ: 100% → 100% (変化なし)
+- **今後のイテレーションへの学び:**
+  - `useSyncExternalStore` の `getServerSnapshot` は renderToString 時に呼ばれる。subscribe は呼ばれない
+  - SSR テストは `@vitest-environment node` で typeof window === "undefined" を実現。jsdom テストとは別ファイルに分離する
+  - EffectProvider の SSR 対応: state === null 時に null を返す既存ロジックを `isSSR` フラグで分岐。SSR時は null contexts でも children をレンダーする
+  - SSR-only パス（noopSubscribe, useEffect内のnull guard）は jsdom テストでもSSR renderToString テストでもカバーできない。`/* v8 ignore next */` で明示的に除外
+  - `Layer.empty` の型推論は `React.createElement` のオーバーロード解決と相性が悪い。型注釈付き変数 + `as React.FC<any>` キャストで回避
+---
 
 ## 2026-03-03 - Reactivityサービス統合 (タスク 3.5)
 - 実装した内容:
