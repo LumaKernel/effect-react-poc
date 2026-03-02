@@ -44,6 +44,29 @@
 - SubscriptionRef カウンター: `useEffectRuntime<R, E>()` + `runtime.runFork` + `createSubscribable` + `useSyncExternalStore` パターン（フックの R 型制約を回避）
 - Schema.TaggedClass: `Schema.TaggedClass<T>()("Tag", { fields })` で型定義。class instance spread 禁止（手動プロパティ指定）
 - Layer合成: `ServiceLive.pipe(Layer.provide(DependencyLive))` で依存注入
+- @effect/platform HttpClient: `HttpClientResponse.schemaBodyJson` は Scope を要求 → `Effect.scoped` が必要
+- HttpClient 自己完結 Effect: `Effect.provide(FetchHttpClient.layer)` で R=never にして useEffectQuery に渡す
+
+## 2026-03-03 - data-fetching example (タスク 4.4)
+- 実装した内容:
+  - examples/data-fetching: @effect/platform HttpClient を使ったデータフェッチ
+  - api.ts: fetchPosts / fetchPost / fetchInvalid — HttpClient.get + schemaBodyJson + Schema バリデーション
+  - QueryView: useEffectQuery + matchEffectResult で非Suspense版（全状態を明示的にハンドリング）
+  - SuspenseView: useEffectSuspense + EffectBoundary でSuspense版（自動ローディング/エラーUI）
+  - ErrorView: 意図的に失敗するクエリでErrorBoundaryのデモ
+  - ApiError: Data.TaggedError で型付きエラー
+  - tsconfig.json に examples/data-fetching のプロジェクト参照追加
+- 変更したファイル:
+  - examples/data-fetching/ (新規: package.json, tsconfig.json, vite.config.ts, index.html, src/*.tsx, src/*.ts)
+  - tsconfig.json (examples/data-fetching 参照追加)
+  - pnpm-lock.yaml (@effect/platform 追加)
+- カバレッジ: 100% → 100% (変化なし、examples はカバレッジ対象外)
+- **今後のイテレーションへの学び:**
+  - `HttpClientResponse.schemaBodyJson` は `Scope` を R に要求する。`Effect.scoped` をパイプラインに追加して Scope を閉じる必要がある
+  - useEffectQuery/useEffectSuspense は R=never のため、Effect 自体を `Effect.provide(FetchHttpClient.layer)` で自己完結させるパターンが必要
+  - `@typescript-eslint/restrict-template-expressions` は `number` を直接テンプレートリテラルに入れるのを禁止。`String(id) satisfies string` で変換
+  - `@effect/platform` ^0.78.0 を examples の依存に追加（packages/core, packages/react には追加しない — example 固有の依存）
+---
 
 ## 2026-03-03 - todo-app example (タスク 4.3)
 - 実装した内容:
