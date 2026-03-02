@@ -12,3 +12,7 @@ export {
 export { useEffectQuery } from "./useEffectQuery.js";
 
 export { EffectError, useEffectSuspense } from "./useEffectSuspense.js";
+
+export type { MutationState } from "./useEffectMutation.js";
+
+export { useEffectMutation } from "./useEffectMutation.js";
