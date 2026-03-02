@@ -34,6 +34,7 @@
     { "path": "examples/typed-errors" },
     { "path": "examples/retry-with-fallback" },
     { "path": "examples/resource-cleanup" },
+    { "path": "examples/database-connection" },
     { "path": "tsconfig.node.json" }
   ],
   "files": []
