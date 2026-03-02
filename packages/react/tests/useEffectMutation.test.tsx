@@ -660,4 +660,164 @@ describe("useEffectMutation", () => {
       );
     });
   });
+
+  describe("invalidateTags", () => {
+    it("invalidates tagged queries on successful mutation", async () => {
+      let queryCallCount = 0;
+
+      const { result, rerender } = renderHook(
+        () => {
+          const query = useEffectQuery(
+            "user-data",
+            Effect.sync(() => {
+              queryCallCount++;
+              return `user-${String(queryCallCount) satisfies string}`;
+            }),
+            { tags: ["user"] },
+          );
+          const mutation = useEffectMutation(
+            (name: string) =>
+              Effect.succeed(`created-${name satisfies string}`),
+            { invalidateTags: ["user"] },
+          );
+          return { query, mutation };
+        },
+        { wrapper },
+      );
+
+      await waitForProvider(rerender);
+
+      // Wait for query to settle
+      await vi.waitFor(() => {
+        expect(isSuccess(result.current.query)).toBe(true);
+      });
+
+      const countBeforeMutation = queryCallCount;
+
+      // Trigger mutation
+      act(() => {
+        result.current.mutation.mutate("new-user");
+      });
+
+      // Wait for mutation to succeed
+      await vi.waitFor(() => {
+        expect(isSuccess(result.current.mutation.result)).toBe(true);
+      });
+
+      // Query should have been re-fetched
+      await vi.waitFor(() => {
+        expect(queryCallCount).toBeGreaterThan(countBeforeMutation);
+      });
+    });
+
+    it("does not invalidate queries on failed mutation", async () => {
+      let queryCallCount = 0;
+
+      const { result, rerender } = renderHook(
+        () => {
+          const query = useEffectQuery(
+            "user-data-fail",
+            Effect.sync(() => {
+              queryCallCount++;
+              return "user-data";
+            }),
+            { tags: ["user"] },
+          );
+          const mutation = useEffectMutation(
+            (_: string) => Effect.fail("mutation-error"),
+            { invalidateTags: ["user"] },
+          );
+          return { query, mutation };
+        },
+        { wrapper },
+      );
+
+      await waitForProvider(rerender);
+
+      // Wait for query to settle
+      await vi.waitFor(() => {
+        expect(isSuccess(result.current.query)).toBe(true);
+      });
+
+      const countBeforeMutation = queryCallCount;
+
+      // Trigger mutation (will fail)
+      act(() => {
+        result.current.mutation.mutate("will-fail");
+      });
+
+      // Wait for mutation to fail
+      await vi.waitFor(() => {
+        expect(isFailure(result.current.mutation.result)).toBe(true);
+      });
+
+      // Query should NOT have been re-fetched
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100);
+      });
+      expect(queryCallCount).toBe(countBeforeMutation);
+    });
+
+    it("does not invalidate unrelated queries", async () => {
+      let userCallCount = 0;
+      let postCallCount = 0;
+
+      const { result, rerender } = renderHook(
+        () => {
+          const userQuery = useEffectQuery(
+            "user-query-unrelated",
+            Effect.sync(() => {
+              userCallCount++;
+              return "user";
+            }),
+            { tags: ["user"] },
+          );
+          const postQuery = useEffectQuery(
+            "post-query-unrelated",
+            Effect.sync(() => {
+              postCallCount++;
+              return "post";
+            }),
+            { tags: ["post"] },
+          );
+          const mutation = useEffectMutation(
+            (_: string) => Effect.succeed("ok"),
+            { invalidateTags: ["user"] },
+          );
+          return { userQuery, postQuery, mutation };
+        },
+        { wrapper },
+      );
+
+      await waitForProvider(rerender);
+
+      // Wait for both queries to settle
+      await vi.waitFor(() => {
+        expect(isSuccess(result.current.userQuery)).toBe(true);
+        expect(isSuccess(result.current.postQuery)).toBe(true);
+      });
+
+      const postCountBefore = postCallCount;
+
+      // Trigger mutation (invalidates "user" tag only)
+      act(() => {
+        result.current.mutation.mutate("input");
+      });
+
+      // Wait for mutation to succeed
+      await vi.waitFor(() => {
+        expect(isSuccess(result.current.mutation.result)).toBe(true);
+      });
+
+      // User query should have been re-fetched, post should not
+      await vi.waitFor(() => {
+        expect(userCallCount).toBeGreaterThan(1);
+      });
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100);
+      });
+      expect(postCallCount).toBe(postCountBefore);
+    });
+  });
 });

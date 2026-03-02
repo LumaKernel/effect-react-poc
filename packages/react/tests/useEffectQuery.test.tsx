@@ -299,4 +299,27 @@ describe("useEffectQuery", () => {
       });
     });
   });
+
+  describe("tags option", () => {
+    it("passes tags to the store for tag-based invalidation", async () => {
+      let callCount = 0;
+      const effect = Effect.sync(() => {
+        callCount++;
+        return `value-${String(callCount) satisfies string}`;
+      });
+
+      const { result, rerender } = renderHook(
+        () => useEffectQuery("tagged-query", effect, { tags: ["user"] }),
+        { wrapper },
+      );
+
+      await waitForProvider(rerender);
+
+      await vi.waitFor(() => {
+        expect(isSuccess(result.current)).toBe(true);
+      });
+
+      expect(callCount).toBeGreaterThanOrEqual(1);
+    });
+  });
 });

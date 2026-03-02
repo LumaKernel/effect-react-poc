@@ -22,7 +22,8 @@ export type QueryFilter =
   | { readonly type: "exact"; readonly key: string }
   | { readonly type: "prefix"; readonly prefix: string }
   | { readonly type: "predicate"; readonly predicate: (key: string) => boolean }
-  | { readonly type: "all" };
+  | { readonly type: "all" }
+  | { readonly type: "tags"; readonly tags: readonly string[] };
 
 /**
  * Configuration for EffectStore.
@@ -74,6 +75,14 @@ export interface RunOptions<E> {
    * Uses `Effect.retry(effect, schedule)` internally.
    */
   readonly schedule?: Schedule.Schedule<unknown, E>;
+
+  /**
+   * Tags for this query entry. Used for tag-based invalidation via
+   * `invalidateByTags()` or `QueryFilter` with `type: "tags"`.
+   * Tags are additive: if the same key is run with different tags,
+   * the most recent tags replace the previous ones.
+   */
+  readonly tags?: readonly string[];
 }
 
 /**
@@ -120,6 +129,8 @@ interface StoreEntry {
   gcTimer: ReturnType<typeof setTimeout> | null;
   effect: Effect.Effect<unknown, unknown> | null;
   schedule: Schedule.Schedule<unknown> | null;
+  /** Tags for tag-based invalidation. Updated on each `run`. */
+  tags: readonly string[];
   /** Timestamp (Date.now()) when the entry last settled to Success or Failure. null if never settled. */
   settledAt: number | null;
   /** Monotonically increasing version for optimistic update conflict detection. Incremented by setOptimistic, run, clearCache, resetEntry. */
@@ -231,6 +242,13 @@ export interface EffectStore {
   readonly setOptimistic: (key: string, value: unknown) => OptimisticRollback;
 
   /**
+   * Invalidate all entries that have at least one of the given tags.
+   * Uses a reverse index for efficient lookup.
+   * Shorthand for `invalidateQueries({ type: "tags", tags })`.
+   */
+  readonly invalidateByTags: (tags: readonly string[]) => void;
+
+  /**
    * Notify the store that the window has regained focus.
    * If `refetchOnWindowFocus` is enabled, invalidates all stale entries
    * that have active subscribers (subscriberCount > 0).
@@ -266,7 +284,11 @@ export interface StoreRuntime {
   ) => Fiber.RuntimeFiber<A, unknown>;
 }
 
-const matchesFilter = (filter: QueryFilter, key: string): boolean => {
+const matchesFilter = (
+  filter: QueryFilter,
+  key: string,
+  entryTags: readonly string[],
+): boolean => {
   switch (filter.type) {
     case "exact":
       return filter.key === key;
@@ -276,6 +298,8 @@ const matchesFilter = (filter: QueryFilter, key: string): boolean => {
       return filter.predicate(key);
     case "all":
       return true;
+    case "tags":
+      return filter.tags.some((tag) => entryTags.includes(tag));
   }
 };
 
@@ -297,6 +321,9 @@ export const createEffectStore = (
   const entries = new Map<string, StoreEntry>();
   let disposed = false;
 
+  // Reverse index: tag → Set<key> for O(1) tag-based lookups
+  const tagIndex = new Map<string, Set<string>>();
+
   const getOrCreateEntry = (key: string): StoreEntry => {
     const existing = entries.get(key);
     if (existing) {
@@ -310,11 +337,50 @@ export const createEffectStore = (
       gcTimer: null,
       effect: null,
       schedule: null,
+      tags: [],
       settledAt: null,
       version: 0,
     };
     entries.set(key, entry);
     return entry;
+  };
+
+  const updateTagIndex = (
+    key: string,
+    oldTags: readonly string[],
+    newTags: readonly string[],
+  ): void => {
+    // Remove from old tags
+    for (const tag of oldTags) {
+      const keys = tagIndex.get(tag);
+      if (keys) {
+        keys.delete(key);
+        if (keys.size === 0) {
+          tagIndex.delete(tag);
+        }
+      }
+    }
+    // Add to new tags
+    for (const tag of newTags) {
+      let keys = tagIndex.get(tag);
+      if (!keys) {
+        keys = new Set();
+        tagIndex.set(tag, keys);
+      }
+      keys.add(key);
+    }
+  };
+
+  const removeFromTagIndex = (key: string, tags: readonly string[]): void => {
+    for (const tag of tags) {
+      const keys = tagIndex.get(tag);
+      if (keys) {
+        keys.delete(key);
+        if (keys.size === 0) {
+          tagIndex.delete(tag);
+        }
+      }
+    }
   };
 
   const cancelGcTimer = (entry: StoreEntry): void => {
@@ -341,10 +407,12 @@ export const createEffectStore = (
       runtime.runFork(Fiber.interruptFork(entry.fiber));
       entry.fiber = null;
     }
+    removeFromTagIndex(key, entry.tags);
     entry.subscribable.set(initial);
     entry.retrySubscribable.set(initialRetryState);
     entry.effect = null;
     entry.schedule = null;
+    entry.tags = [];
     entry.settledAt = null;
     entries.delete(key);
   };
@@ -355,11 +423,13 @@ export const createEffectStore = (
       runtime.runFork(Fiber.interruptFork(entry.fiber));
       entry.fiber = null;
     }
+    removeFromTagIndex(key, entry.tags);
     entry.version++;
     entry.subscribable.set(initial);
     entry.retrySubscribable.set(initialRetryState);
     entry.effect = null;
     entry.schedule = null;
+    entry.tags = [];
     entry.settledAt = null;
     // Unlike cleanupEntry, we don't delete the entry from the map
     // so that subscribers are notified of the state change.
@@ -380,6 +450,7 @@ export const createEffectStore = (
     key: string,
     effect: Effect.Effect<unknown, unknown>,
     schedule: Schedule.Schedule<unknown> | null,
+    tags: readonly string[] | null,
   ): void => {
     if (disposed) {
       return;
@@ -388,6 +459,10 @@ export const createEffectStore = (
     const entry = getOrCreateEntry(key);
     entry.effect = effect;
     entry.schedule = schedule;
+    if (tags !== null) {
+      updateTagIndex(key, entry.tags, tags);
+      entry.tags = tags;
+    }
     entry.version++;
 
     // Interrupt any existing fiber for this key
@@ -490,7 +565,8 @@ export const createEffectStore = (
       // This is safe because the schedule is always paired with its matching effect.
       const schedule =
         (options?.schedule as Schedule.Schedule<unknown> | undefined) ?? null;
-      runEffect(key, effect, schedule);
+      const tags = options?.tags ?? null;
+      runEffect(key, effect, schedule, tags);
     },
 
     invalidate: (key: string): void => {
@@ -498,18 +574,16 @@ export const createEffectStore = (
       if (!entry?.effect) {
         return;
       }
-      runEffect(key, entry.effect, entry.schedule);
+      runEffect(key, entry.effect, entry.schedule, null);
     },
 
     invalidateQueries: (filter: QueryFilter): void => {
       // Snapshot keys to avoid mutation during iteration
       const keys = [...entries.keys()];
       for (const key of keys) {
-        if (matchesFilter(filter, key)) {
-          const entry = entries.get(key);
-          if (entry?.effect) {
-            runEffect(key, entry.effect, entry.schedule);
-          }
+        const entry = entries.get(key);
+        if (entry?.effect && matchesFilter(filter, key, entry.tags)) {
+          runEffect(key, entry.effect, entry.schedule, null);
         }
       }
     },
@@ -539,11 +613,9 @@ export const createEffectStore = (
     clearCacheByFilter: (filter: QueryFilter): void => {
       const keys = [...entries.keys()];
       for (const key of keys) {
-        if (matchesFilter(filter, key)) {
-          const entry = entries.get(key);
-          if (entry) {
-            resetEntry(key, entry);
-          }
+        const entry = entries.get(key);
+        if (entry && matchesFilter(filter, key, entry.tags)) {
+          resetEntry(key, entry);
         }
       }
     },
@@ -613,6 +685,10 @@ export const createEffectStore = (
       };
     },
 
+    invalidateByTags: (tags: readonly string[]): void => {
+      store.invalidateQueries({ type: "tags", tags });
+    },
+
     notifyFocus: (): void => {
       if (!resolvedConfig.refetchOnWindowFocus) {
         return;
@@ -622,7 +698,7 @@ export const createEffectStore = (
         const entry = entries.get(key);
         if (entry && entry.subscriberCount > 0 && entry.effect) {
           if (store.isStale(key)) {
-            runEffect(key, entry.effect, entry.schedule);
+            runEffect(key, entry.effect, entry.schedule, null);
           }
         }
       }
@@ -639,6 +715,7 @@ export const createEffectStore = (
         entry.fiber = null;
       }
       entries.clear();
+      tagIndex.clear();
 
       for (const fiber of fibers) {
         yield* Fiber.interrupt(fiber);

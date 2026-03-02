@@ -338,4 +338,67 @@ describe("EffectObserver", () => {
       await runtime.dispose();
     });
   });
+
+  describe("tags passthrough", () => {
+    it("passes tags to store.run via options", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      const observer = createEffectObserver(
+        store,
+        "user/1",
+        Effect.sync(() => {
+          callCount++;
+          return "user1";
+        }),
+        { tags: ["user"] },
+      );
+
+      const unsub = observer.subscribe(() => {});
+      await vi.waitFor(() => {
+        expect(observer.getSnapshot()).toEqual(success("user1"));
+      });
+      expect(callCount).toBe(1);
+
+      // Tag-based invalidation should work
+      store.invalidateByTags(["user"]);
+
+      await vi.waitFor(() => {
+        expect(callCount).toBe(2);
+      });
+
+      unsub();
+      await runtime.dispose();
+    });
+
+    it("passes both schedule and tags together", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      const observer = createEffectObserver(
+        store,
+        "data",
+        Effect.sync(() => {
+          callCount++;
+          return "data";
+        }),
+        { schedule: Schedule.recurs(0), tags: ["data-tag"] },
+      );
+
+      const unsub = observer.subscribe(() => {});
+      await vi.waitFor(() => {
+        expect(observer.getSnapshot()).toEqual(success("data"));
+      });
+
+      // Tag-based invalidation should work alongside schedule
+      store.invalidateByTags(["data-tag"]);
+
+      await vi.waitFor(() => {
+        expect(callCount).toBe(2);
+      });
+
+      unsub();
+      await runtime.dispose();
+    });
+  });
 });

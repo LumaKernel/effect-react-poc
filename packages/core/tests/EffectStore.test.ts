@@ -1453,4 +1453,380 @@ describe("EffectStore", () => {
       await runtime.dispose();
     });
   });
+
+  describe("tag-based invalidation", () => {
+    it("run with tags registers the entry in the tag index", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+      store.run(
+        "user/1",
+        Effect.sync(() => {
+          callCount++;
+          return "user1";
+        }),
+        {
+          tags: ["user"],
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("user/1")).toEqual(success("user1"));
+      });
+      expect(callCount).toBe(1);
+
+      // Invalidate by tags should re-run the effect
+      store.invalidateByTags(["user"]);
+
+      await vi.waitFor(() => {
+        expect(callCount).toBe(2);
+      });
+
+      await runtime.dispose();
+    });
+
+    it("invalidateByTags does not affect entries without matching tags", async () => {
+      const { store, runtime } = createTestStore();
+      let userCallCount = 0;
+      let postCallCount = 0;
+
+      store.run(
+        "user/1",
+        Effect.sync(() => {
+          userCallCount++;
+          return "user1";
+        }),
+        {
+          tags: ["user"],
+        },
+      );
+      store.run(
+        "post/1",
+        Effect.sync(() => {
+          postCallCount++;
+          return "post1";
+        }),
+        {
+          tags: ["post"],
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("user/1")).toEqual(success("user1"));
+        expect(store.getSnapshot("post/1")).toEqual(success("post1"));
+      });
+
+      store.invalidateByTags(["user"]);
+
+      await vi.waitFor(() => {
+        expect(userCallCount).toBe(2);
+      });
+      // Post should not have been re-fetched
+      expect(postCallCount).toBe(1);
+
+      await runtime.dispose();
+    });
+
+    it("invalidateByTags with multiple tags uses OR logic", async () => {
+      const { store, runtime } = createTestStore();
+      let userCallCount = 0;
+      let postCallCount = 0;
+      let commentCallCount = 0;
+
+      store.run(
+        "user/1",
+        Effect.sync(() => {
+          userCallCount++;
+          return "user1";
+        }),
+        {
+          tags: ["user"],
+        },
+      );
+      store.run(
+        "post/1",
+        Effect.sync(() => {
+          postCallCount++;
+          return "post1";
+        }),
+        {
+          tags: ["post"],
+        },
+      );
+      store.run(
+        "comment/1",
+        Effect.sync(() => {
+          commentCallCount++;
+          return "comment1";
+        }),
+        {
+          tags: ["comment"],
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("user/1")).toEqual(success("user1"));
+        expect(store.getSnapshot("post/1")).toEqual(success("post1"));
+        expect(store.getSnapshot("comment/1")).toEqual(success("comment1"));
+      });
+
+      // Invalidate user OR post
+      store.invalidateByTags(["user", "post"]);
+
+      await vi.waitFor(() => {
+        expect(userCallCount).toBe(2);
+        expect(postCallCount).toBe(2);
+      });
+      // Comment should not have been affected
+      expect(commentCallCount).toBe(1);
+
+      await runtime.dispose();
+    });
+
+    it("entries with no tags are not affected by invalidateByTags", async () => {
+      const { store, runtime } = createTestStore();
+      let noTagCount = 0;
+      let taggedCount = 0;
+
+      store.run(
+        "no-tag",
+        Effect.sync(() => {
+          noTagCount++;
+          return "no-tag";
+        }),
+      );
+      store.run(
+        "tagged",
+        Effect.sync(() => {
+          taggedCount++;
+          return "tagged";
+        }),
+        {
+          tags: ["data"],
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("no-tag")).toEqual(success("no-tag"));
+        expect(store.getSnapshot("tagged")).toEqual(success("tagged"));
+      });
+
+      store.invalidateByTags(["data"]);
+
+      await vi.waitFor(() => {
+        expect(taggedCount).toBe(2);
+      });
+      expect(noTagCount).toBe(1);
+
+      await runtime.dispose();
+    });
+
+    it("entry with multiple tags is invalidated by any matching tag", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      store.run(
+        "user/1/posts",
+        Effect.sync(() => {
+          callCount++;
+          return "data";
+        }),
+        {
+          tags: ["user", "post"],
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("user/1/posts")).toEqual(success("data"));
+      });
+
+      // Either tag should work
+      store.invalidateByTags(["post"]);
+
+      await vi.waitFor(() => {
+        expect(callCount).toBe(2);
+      });
+
+      await runtime.dispose();
+    });
+
+    it("clearCache removes entry from tag index", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      store.run(
+        "user/1",
+        Effect.sync(() => {
+          callCount++;
+          return "user1";
+        }),
+        {
+          tags: ["user"],
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("user/1")).toEqual(success("user1"));
+      });
+
+      store.clearCache("user/1");
+      expect(store.getSnapshot("user/1")).toEqual(initial);
+
+      // invalidateByTags should not re-run since the entry was cleared
+      store.invalidateByTags(["user"]);
+      // Give a moment for any potential async effects
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      // callCount should still be 1 (original run only)
+      expect(callCount).toBe(1);
+
+      await runtime.dispose();
+    });
+
+    it("invalidateQueries with tags filter works", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      store.run(
+        "user/1",
+        Effect.sync(() => {
+          callCount++;
+          return "user1";
+        }),
+        {
+          tags: ["user"],
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("user/1")).toEqual(success("user1"));
+      });
+
+      store.invalidateQueries({ type: "tags", tags: ["user"] });
+
+      await vi.waitFor(() => {
+        expect(callCount).toBe(2);
+      });
+
+      await runtime.dispose();
+    });
+
+    it("clearCacheByFilter with tags filter works", async () => {
+      const { store, runtime } = createTestStore();
+
+      store.run(
+        "user/1",
+        Effect.sync(() => "user1"),
+        {
+          tags: ["user"],
+        },
+      );
+      store.run(
+        "post/1",
+        Effect.sync(() => "post1"),
+        {
+          tags: ["post"],
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("user/1")).toEqual(success("user1"));
+        expect(store.getSnapshot("post/1")).toEqual(success("post1"));
+      });
+
+      store.clearCacheByFilter({ type: "tags", tags: ["user"] });
+
+      expect(store.getSnapshot("user/1")).toEqual(initial);
+      expect(store.getSnapshot("post/1")).toEqual(success("post1"));
+
+      await runtime.dispose();
+    });
+
+    it("re-run with new tags updates the tag index", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      store.run(
+        "data",
+        Effect.sync(() => {
+          callCount++;
+          return "v1";
+        }),
+        {
+          tags: ["old-tag"],
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("data")).toEqual(success("v1"));
+      });
+
+      // Re-run with different tags
+      store.run(
+        "data",
+        Effect.sync(() => {
+          callCount++;
+          return "v2";
+        }),
+        {
+          tags: ["new-tag"],
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("data")).toEqual(success("v2"));
+      });
+
+      // Old tag should no longer work
+      store.invalidateByTags(["old-tag"]);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      const countAfterOldTag = callCount;
+
+      // New tag should work
+      store.invalidateByTags(["new-tag"]);
+      await vi.waitFor(() => {
+        expect(callCount).toBe(countAfterOldTag + 1);
+      });
+
+      await runtime.dispose();
+    });
+
+    it("invalidate preserves existing tags", async () => {
+      const { store, runtime } = createTestStore();
+      let callCount = 0;
+
+      store.run(
+        "user/1",
+        Effect.sync(() => {
+          callCount++;
+          return "user1";
+        }),
+        {
+          tags: ["user"],
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(store.getSnapshot("user/1")).toEqual(success("user1"));
+      });
+
+      // invalidate (not invalidateByTags) should keep tags
+      store.invalidate("user/1");
+
+      await vi.waitFor(() => {
+        expect(callCount).toBe(2);
+      });
+
+      // Tags should still work after invalidate
+      store.invalidateByTags(["user"]);
+
+      await vi.waitFor(() => {
+        expect(callCount).toBe(3);
+      });
+
+      await runtime.dispose();
+    });
+  });
 });

@@ -16,6 +16,12 @@ export interface EffectObserverOptions<E> {
    * Passed through to `store.run(key, effect, { schedule })`.
    */
   readonly schedule?: Schedule.Schedule<unknown, E>;
+
+  /**
+   * Tags for this query entry. Used for tag-based invalidation.
+   * Passed through to `store.run(key, effect, { tags })`.
+   */
+  readonly tags?: readonly string[];
 }
 
 /**
@@ -38,9 +44,13 @@ export const createEffectObserver = <A, E>(
 ): Subscribable<EffectResult<A, E>> => {
   let subscriberCount = 0;
 
-  const runOptions: RunOptions<E> | undefined = options?.schedule
-    ? { schedule: options.schedule }
-    : undefined;
+  const runOptions: RunOptions<E> | undefined =
+    options?.schedule || options?.tags
+      ? {
+          ...(options.schedule ? { schedule: options.schedule } : undefined),
+          ...(options.tags ? { tags: options.tags } : undefined),
+        }
+      : undefined;
 
   const subscribe = (callback: () => void): (() => void) => {
     subscriberCount++;

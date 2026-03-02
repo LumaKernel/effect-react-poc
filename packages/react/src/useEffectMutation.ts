@@ -16,7 +16,7 @@ import {
   success,
 } from "@effect-react/core";
 import type { EffectManagedRuntime } from "./EffectProvider.js";
-import { useEffectRuntime } from "./EffectProvider.js";
+import { useEffectRuntime, useEffectStore } from "./EffectProvider.js";
 
 /**
  * Options for `useEffectMutation`.
@@ -42,6 +42,13 @@ export interface MutationOptions<I, A, E> {
    * Automatic rollback (from `onMutate`) happens before this callback.
    */
   readonly onError?: (cause: Cause.Cause<E>, input: I) => void;
+  /**
+   * Tags to invalidate on successful mutation.
+   * Queries registered with any of these tags will be automatically
+   * re-fetched after a successful mutation.
+   * No invalidation occurs on mutation failure.
+   */
+  readonly invalidateTags?: readonly string[];
 }
 
 /**
@@ -122,6 +129,7 @@ export const useEffectMutation = <I, A, E>(
 ): MutationState<I, A, E> => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const runtime = useEffectRuntime<any, any>();
+  const store = useEffectStore();
 
   const effectFnRef = useRef(effectFn);
   effectFnRef.current = effectFn;
@@ -190,6 +198,11 @@ export const useEffectMutation = <I, A, E>(
           onSuccess: (value) => {
             internals.rollback = null;
             internals.subscribable.set(success(value));
+            // Invalidate tagged queries on success
+            const tagsToInvalidate = optionsRef.current?.invalidateTags;
+            if (tagsToInvalidate && tagsToInvalidate.length > 0) {
+              store.invalidateByTags(tagsToInvalidate);
+            }
             optionsRef.current?.onSuccess?.(value, input);
           },
         });
