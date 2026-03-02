@@ -12,6 +12,8 @@
 - EffectStore: `StoreRuntime` インターフェースで ManagedRuntime に依存しない抽象化
 - ManagedRuntime テスト: `ManagedRuntime.make(Layer.empty)` で空のランタイム作成
 - EffectObserver: subscribe→run の順序で通知を漏らさない（store.subscribeを先に呼ぶ）
+- React テスト: `@vitest-environment jsdom` コメント + `@testing-library/react` の `renderHook`/`render`
+- React Context 型消去: `createContext<any>` + フック呼び出し時の `<R, E>` 型指定
 
 ## 2026-03-03 - 初期セットアップ
 - 実装した内容:
@@ -121,4 +123,29 @@
   - Observer の subscribe 内で store.subscribe を store.run **より前に**呼ぶことで、Pending 通知を漏らさない
   - EffectObserver は EffectStore の薄いラッパーであり、GC・Fiber管理はすべて EffectStore に委譲できる
   - `isInitial` を使ってキャッシュ有無を判定し、re-subscribe 時の不要な再実行を防止
+---
+
+## 2026-03-03 - EffectProvider 実装 (タスク 2.1)
+- 実装した内容:
+  - `EffectProvider` コンポーネント: React Context で ManagedRuntime をツリーに提供
+  - `useEffectRuntime()` フック: Provider 外で使用時に明確なエラーメッセージ
+  - `EffectManagedRuntime<R, E>` インターフェース: ManagedRuntime の最小公開インターフェース
+  - Layer prop → useEffect で ManagedRuntime 生成、cleanup で dispose
+  - Layer 変更時にランタイムを再生成（旧ランタイムは dispose）
+  - 5テスト (Provider外エラー、ランタイム取得、unmount時dispose、Layer変更時再生成、サービスアクセス)
+- 変更したファイル:
+  - packages/react/src/EffectProvider.tsx (新規)
+  - packages/react/src/index.ts (re-export追加)
+  - packages/react/tests/EffectProvider.test.tsx (新規)
+  - packages/react/package.json (devDependencies: react, @types/react, react-dom, @types/react-dom, @testing-library/react)
+  - package.json (devDependencies: jsdom)
+  - vitest.config.ts (.tsx テストパターン追加)
+  - eslint.config.js (.trash/ を ignore に追加)
+- カバレッジ: 100% → 100% (EffectProvider.tsx 100%)
+- **今後のイテレーションへの学び:**
+  - React Context で型消去が必要: `createContext<any>` + `useEffectRuntime<R, E>()` で呼び出し時に型指定。`@typescript-eslint/no-unsafe-return` の eslint-disable が必要
+  - `@testing-library/react` の `renderHook` で wrapper の props を動的に変えるには `initialProps` + wrapper の追加 props パターンを使う。ただし `render` + カスタムコンポーネントの方が制御しやすいケースもある
+  - `ManagedRuntime.make(Layer.empty)` は vitest + jsdom 環境で問題なく動作する。ただし `Layer.mergeAll(Layer.empty)` は `_op_layer` エラーを起こすことがある
+  - vitest で jsdom 環境を使うには `@vitest-environment jsdom` コメントをテストファイル先頭に追加する
+  - React テスト用に `.tsx` ファイルのテストパターンを `vitest.config.ts` の include に追加する必要がある
 ---
