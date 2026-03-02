@@ -49,6 +49,34 @@
 - Deferred ゲートパターン: Stream.paginateChunkEffect 内で `Deferred.await` → React ref 経由で `Deferred.succeed` するとユーザー操作でストリーム進行を制御可能
 - `Deferred.make<undefined>()` を使う（`void` は `@typescript-eslint/no-invalid-void-type` でエラー）
 
+## 2026-03-03 - real-time-chat example (タスク 4.6)
+- 実装した内容:
+  - examples/real-time-chat: PubSub + Stream + Schedule.exponential によるリアルタイムチャット
+  - message.ts: ChatMessage型定義、ConnectionState型、WebSocketError
+  - WebSocketService.ts: Context.Tag + Layer.effect でWebSocket風サービス
+    - PubSub.bounded でメッセージ配信
+    - SubscriptionRef で接続状態管理
+    - Stream.retry + Schedule.exponential で自動再接続
+    - シミュレーションモード（エコーサーバー + 周期的切断/再接続）
+  - useChat.ts: useChatMessages（Stream.scan で累積）、useSendMessage、useConnectionState
+  - ChatRoom.tsx: メッセージ一覧 + 入力フォーム（自分/エコーの吹き出し表示）
+  - ConnectionStatus.tsx: 接続状態インジケーター（green/red/orange）
+  - App.tsx: EffectProvider + WebSocketServiceLive の統合
+  - tsconfig.json に examples/real-time-chat + examples/infinite-scroll の参照追加
+- 変更したファイル:
+  - examples/real-time-chat/ (新規: package.json, tsconfig.json, vite.config.ts, index.html, src/*.tsx, src/*.ts)
+  - tsconfig.json (examples/infinite-scroll, examples/real-time-chat 参照追加)
+  - pnpm-lock.yaml
+- カバレッジ: 100% → 100% (変化なし、examples はカバレッジ対象外)
+- **今後のイテレーションへの学び:**
+  - PubSub.bounded のPubSub型は contravariant なので、object literal を直接 publish に渡すと union リテラル型が string に拡大される。変数に ChatMessage 型を明示して回避
+  - `Stream.scan<S, A>(s, f)` の型パラメータ順序: S=state, A=input。pipe 使用時は初期値の型から推論させるのが確実
+  - `luma-ts/no-date` の eslint-disable コメントは `luma-ts/no-date` が正しい（`@luma-dev/luma-ts/no-date` ではない）
+  - Stream.retry + Schedule.exponential + Schedule.compose(Schedule.recurs) でリトライ回数制限付き指数バックオフ
+  - Effect.sleep に template literal は DurationInput として不正。数値 (milliseconds) を直接渡す
+  - 欠損していた examples/infinite-scroll の tsconfig 参照も追加した
+---
+
 ## 2026-03-03 - infinite-scroll example (タスク 4.5)
 - 実装した内容:
   - examples/infinite-scroll: Stream.paginateChunkEffect + Deferred + IntersectionObserver による無限スクロール

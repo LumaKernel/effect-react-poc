@@ -28,6 +28,8 @@
     { "path": "examples/counter" },
     { "path": "examples/todo-app" },
     { "path": "examples/data-fetching" },
+    { "path": "examples/infinite-scroll" },
+    { "path": "examples/real-time-chat" },
     { "path": "tsconfig.node.json" }
   ],
   "files": []
