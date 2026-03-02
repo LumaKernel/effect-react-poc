@@ -27,6 +27,7 @@
     { "path": "examples/hello-world" },
     { "path": "examples/counter" },
     { "path": "examples/todo-app" },
+    { "path": "examples/data-fetching" },
     { "path": "tsconfig.node.json" }
   ],
   "files": []
