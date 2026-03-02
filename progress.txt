@@ -51,6 +51,30 @@
 - v8 coverage: switch の同一処理 case は統合する（CI/localでカバレッジ差異が出るフレーク防止）
 - EffectBoundary renderError: `Cause<unknown>` を受け取る（型消去）。`instanceof` で AppError に runtime narrowing
 
+- Layer.scoped: `Layer.scoped(Tag, Effect.gen(function* () { ... yield* Effect.acquireRelease(...); ... }))` でリソースのライフサイクルをLayerスコープ（Provider）に紐づける
+- withConnection パターン: `Effect.ensuring` で接続取得→使用→解放を安全に管理。エラー時も確実にリリース
+
+## 2026-03-03 - database-connection example (タスク 4.11)
+- 実装した内容:
+  - examples/database-connection: Layer.scoped + Effect.acquireRelease による接続プール管理のデモ
+  - ConnectionPool.ts: ConnectionPoolService (Context.Tag) + Layer.scoped で接続プール作成。Effect.acquireRelease でプール初期化/解放。SubscriptionRef でプール状態リアクティブ監視
+  - useConnectionPool.ts: usePoolState（Stream → createSubscribable → useSyncExternalStore）、usePoolActions（runtime.runFork + withConnection）
+  - PoolStatusDemo.tsx: 接続プール状態（Total/Active/Idle）のリアルタイム表示 + ログビューア
+  - TransactionDemo.tsx: 単一クエリ実行 + 3並行クエリ実行（Effect.all + concurrency: "unbounded"）。withConnection パターンのデモ
+  - LifecycleDemo.tsx: Provider マウント/アンマウントでプール作成/破棄を可視化。プールサイズ選択可能
+  - App.tsx: 2セクション構成（常時Provider + ライフサイクル制御）
+- 変更したファイル:
+  - examples/database-connection/ (新規: package.json, tsconfig.json, vite.config.ts, index.html, src/*.tsx, src/*.ts)
+  - tsconfig.json (examples/database-connection 参照追加)
+  - pnpm-lock.yaml
+- カバレッジ: 100% → 100% (変化なし、examples はカバレッジ対象外)
+- **今後のイテレーションへの学び:**
+  - `Layer.scoped(Tag, scopedEffect)` は `Effect.acquireRelease` をスコープ内で使える。Provider unmount 時にリリースが実行される
+  - `Effect.ensuring(releaseEffect)` は `try-finally` 相当。成功/失敗に関わらず実行され、接続プールの withConnection パターンに最適
+  - `luma-ts/no-date` は `new Date()` にも適用される（`Date.now()` だけでなく）。コンストラクタも eslint-disable が必要
+  - `void connectionIds` のように `acquireRelease` の戻り値を参照しないと、最適化で消える可能性がある。明示的に参照する
+---
+
 ## 2026-03-03 - resource-cleanup example (タスク 4.10)
 - 実装した内容:
   - examples/resource-cleanup: useEffectScope によるリソースクリーンアップのデモ
