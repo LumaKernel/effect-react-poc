@@ -26,3 +26,11 @@ export {
 export type { Subscribable, MutableSubscribable } from "./Subscribable.js";
 
 export { createSubscribable } from "./Subscribable.js";
+
+export type {
+  EffectStore,
+  EffectStoreConfig,
+  StoreRuntime,
+} from "./EffectStore.js";
+
+export { createEffectStore } from "./EffectStore.js";

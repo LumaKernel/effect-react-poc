@@ -17,12 +17,12 @@
 
 ### 1.4 EffectStore コア実装
 
-- [ ] Effect実行結果のキャッシュ管理
-- [ ] キーベースのルックアップ
-- [ ] `Subscribable`インターフェース実装
-- [ ] ManagedRuntime経由のEffect実行
-- [ ] Fiber割り込みによるキャンセル
-- [ ] GCタイマー（設定可能な猶予期間）
+- [x] Effect実行結果のキャッシュ管理
+- [x] キーベースのルックアップ
+- [x] `Subscribable`インターフェース実装
+- [x] ManagedRuntime経由のEffect実行
+- [x] Fiber割り込みによるキャンセル
+- [x] GCタイマー（設定可能な猶予期間）
 
 **テスト計画**:
 - Effect.succeed → Success状態への遷移
