@@ -50,6 +50,27 @@
 - `Deferred.make<undefined>()` を使う（`void` は `@typescript-eslint/no-invalid-void-type` でエラー）
 - v8 coverage: switch の同一処理 case は統合する（CI/localでカバレッジ差異が出るフレーク防止）
 
+## 2026-03-03 - parallel-requests example (タスク 4.7)
+- 実装した内容:
+  - examples/parallel-requests: Effect.ts 並行処理プリミティブのデモ
+  - api.ts: 模擬APIサービス（遅延・失敗シミュレーション）
+  - ParallelFetch.tsx: Effect.all { concurrency: "unbounded" } で3つのAPIを並行フェッチ
+  - AllSettled.tsx: Effect.all { mode: "either" } で一部失敗でも全結果収集
+  - RaceDemo.tsx: Effect.raceAll で3ミラーサーバーのレース（最速レスポンス採用、他は中断）
+  - SemaphoreDemo.tsx: Effect.makeSemaphore(3) で10タスクの並行数制限 + リアルタイム進捗表示
+  - App.tsx: EffectProvider(Layer.empty) + 4セクション構成
+- 変更したファイル:
+  - examples/parallel-requests/ (新規: package.json, tsconfig.json, vite.config.ts, index.html, src/*.tsx, src/*.ts)
+  - tsconfig.json (examples/parallel-requests 参照追加)
+  - pnpm-lock.yaml
+- カバレッジ: 100% → 100% (変化なし、examples はカバレッジ対象外)
+- **今後のイテレーションへの学び:**
+  - `Effect.all { mode: "either" }` が Effect.ts の allSettled 相当。短絡せず全結果を Either[] で返す
+  - `Effect.raceAll` は配列から最速のものを返す。失敗したものはスキップして次の成功を待つ
+  - `Effect.makeSemaphore(n)` で作成後、`semaphore.withPermits(1)(effect)` でパーミット取得。Effect.all { concurrency: "unbounded" } と組み合わせて実質的な並行数制限を実現
+  - `Effect.Effect<string>` のように第2・第3型パラメータが never の場合は省略（no-unnecessary-type-arguments）
+---
+
 ## 2026-03-03 - real-time-chat example (タスク 4.6)
 - 実装した内容:
   - examples/real-time-chat: PubSub + Stream + Schedule.exponential によるリアルタイムチャット

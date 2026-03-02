@@ -30,6 +30,7 @@
     { "path": "examples/data-fetching" },
     { "path": "examples/infinite-scroll" },
     { "path": "examples/real-time-chat" },
+    { "path": "examples/parallel-requests" },
     { "path": "tsconfig.node.json" }
   ],
   "files": []
