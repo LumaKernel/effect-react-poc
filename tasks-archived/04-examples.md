@@ -122,3 +122,12 @@
 - [x] 親の変更で子が自動再フェッチ
 
 **示す概念**: 依存クエリ、カスケード再フェッチ
+
+### 4.14 form-with-validation: バリデーション付きフォーム
+
+- [x] Schema.decodeUnknownEither でフォームバリデーション
+- [x] リアルタイムバリデーション（debounced）
+- [x] サーバーサイドバリデーション統合
+- [x] 送信時の楽観的UIとエラー復帰
+
+**示す概念**: Schema、バリデーション、debounce、mutation

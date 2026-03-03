@@ -828,3 +828,24 @@
   - `EffectProvider` には `layer` prop が必須。サービス不要なら `Layer.empty` を渡す
   - 親のIDが変わった時に子の選択状態をリセットするのはReact側の責務（`setSelectedProjectId(null)`）
 ---
+
+## 2026-03-03 - Examples: form-with-validation
+- 実装した内容:
+  - `examples/form-with-validation/` バリデーション付きフォームデモ
+  - **schema.ts**: `Schema.String.pipe(Schema.minLength, Schema.maxLength, Schema.pattern)` でフィールドバリデーション。Username/Email/Password各スキーマ
+  - **FormField.tsx**: 個別フィールドコンポーネント。エラー表示 + サーバー検証ステータス表示
+  - **RegistrationForm.tsx**: debounced バリデーション（300ms）+ サーバーサイドusername検証（500ms debounce → `useEffectMutation`）+ 送信mutation
+  - **api.ts**: `checkUsernameAvailability`（重複チェック）+ `submitRegistration`（20%失敗率）
+  - `Schema.decodeUnknownEither` で安全なバリデーション（Either<Success, ParseError>）
+- 変更したファイル:
+  - examples/form-with-validation/ (新規: index.html, package.json, tsconfig.json, vite.config.ts, src/*.tsx, src/api.ts, src/schema.ts, src/main.tsx)
+  - tsconfig.json (project references追加)
+  - pnpm-lock.yaml
+- カバレッジ: 100% → 100% (変化なし、examplesはカバレッジ対象外)
+- **今後のイテレーションへの学び:**
+  - `Schema.String.pipe(Schema.minLength(n, { message }), ...)` で宣言的にバリデーションチェーンを構築
+  - `Schema.decodeUnknownEither(schema)(value)` はカリー化API。結果は `Either<T, ParseError>`
+  - ParseError の issue からメッセージを取得: `result.left.issue` に `message` プロパティがある
+  - React 19で `FormEvent` は deprecated → `SyntheticEvent` を使う
+  - テンプレートリテラル内の複雑な三項演算子は `satisfies string` を式全体に付ける（括弧で囲む）
+---
