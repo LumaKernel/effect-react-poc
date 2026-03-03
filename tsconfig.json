@@ -36,6 +36,7 @@
     { "path": "examples/resource-cleanup" },
     { "path": "examples/database-connection" },
     { "path": "examples/optimistic-updates" },
+    { "path": "examples/dependent-queries" },
     { "path": "tsconfig.node.json" }
   ],
   "files": []
