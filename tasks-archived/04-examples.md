@@ -131,3 +131,11 @@
 - [x] 送信時の楽観的UIとエラー復帰
 
 **示す概念**: Schema、バリデーション、debounce、mutation
+
+### 4.15 concurrent-tabs: タブ間同期
+
+- [x] BroadcastChannelをStream.asyncで抽象化
+- [x] 複数タブ間での状態同期
+- [x] リーダー選出（Effect.race）
+
+**示す概念**: BroadcastChannel、タブ間通信、race

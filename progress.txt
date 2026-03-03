@@ -849,3 +849,23 @@
   - React 19で `FormEvent` は deprecated → `SyntheticEvent` を使う
   - テンプレートリテラル内の複雑な三項演算子は `satisfies string` を式全体に付ける（括弧で囲む）
 ---
+
+## 2026-03-03 - Examples: concurrent-tabs
+- 実装した内容:
+  - `examples/concurrent-tabs/` タブ間同期デモ
+  - **BroadcastService.ts**: `BroadcastChannel` を `Stream.async` でラップ。`SubscriptionRef` で共有カウンタとリーダー状態管理。claim-basedリーダー選出プロトコル
+  - **useTabSync.ts**: `useTabId`, `useSharedCounter`, `useLeader` フック。`createSubscribable` + `useSyncExternalStore` パターン
+  - **SharedCounter.tsx**: タブ間で同期されるカウンター。increment/decrementが全タブに即座に反映
+  - **LeaderElection.tsx**: リーダー/フォロワー状態の表示。リーダーは緑色のインジケータ
+  - `parseTabMessage` でBroadcastChannelの`unknown`データを型安全にパース（`as`を使わずにswitch+narrowing）
+- 変更したファイル:
+  - examples/concurrent-tabs/ (新規: index.html, package.json, tsconfig.json, vite.config.ts, src/*.ts, src/*.tsx)
+  - tsconfig.json (project references追加)
+  - pnpm-lock.yaml
+- カバレッジ: 100% → 100% (変化なし、examplesはカバレッジ対象外)
+- **今後のイテレーションへの学び:**
+  - `Stream.async<T>((emit) => { ... })` でブラウザAPIのイベントをStreamに変換。`emit.single(value)` はPromiseを返すので `void` で明示的に無視
+  - `MessageEvent.data` は `any` 型。`MessageEvent<unknown>` で上書きし、手動パースで型安全にする
+  - `luma-ts/no-explicit-return-is`: 型ガード関数の `: x is T` を明示的に書かない。代わりにパースして新しいオブジェクトを構築する方法が安全
+  - BroadcastChannelのリーダー選出: ランダム遅延後にclaimメッセージを送信し、最初にclaimしたタブがリーダーになる簡易プロトコル
+---
