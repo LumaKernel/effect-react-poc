@@ -35,6 +35,7 @@
     { "path": "examples/retry-with-fallback" },
     { "path": "examples/resource-cleanup" },
     { "path": "examples/database-connection" },
+    { "path": "examples/optimistic-updates" },
     { "path": "tsconfig.node.json" }
   ],
   "files": []
