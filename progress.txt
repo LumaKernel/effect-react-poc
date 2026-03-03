@@ -808,3 +808,23 @@
   - `getValue` で `EffectResult` から値を取り出す（`store.getSnapshot()` の戻り値は `EffectResult<A, E>`）
   - `store.setOptimistic(key, value)` の戻り値は `OptimisticRollback`（`onMutate` から返すと失敗時に自動ロールバック）
 ---
+
+## 2026-03-03 - Examples: dependent-queries
+- 実装した内容:
+  - `examples/dependent-queries/` 依存クエリデモアプリ作成
+  - **UserSelector**: `useEffectQuery("users", fetchUsers)` でユーザー一覧取得・選択UI
+  - **ProjectList**: `useEffectQuery(`projects-${userId}`, fetchProjectsByUser(userId))` でユーザーIDに依存したプロジェクト取得
+  - **TaskList**: `useEffectQuery(`tasks-${projectId}`, fetchTasksByProject(projectId))` でプロジェクトIDに依存したタスク取得
+  - App.tsx: ユーザー変更時にプロジェクト選択をリセット。3段階のカスケードUI
+  - api.ts: User/Project/Task のシミュレートAPI（ランダム遅延300-800ms）
+- 変更したファイル:
+  - examples/dependent-queries/ (新規: index.html, package.json, tsconfig.json, vite.config.ts, src/*.tsx, src/api.ts, src/main.tsx)
+  - tsconfig.json (project references追加)
+  - pnpm-lock.yaml
+- カバレッジ: 100% → 100% (変化なし、examplesはカバレッジ対象外)
+- **今後のイテレーションへの学び:**
+  - 依存クエリは `useEffectQuery` のキーに親IDを含めるだけで実現できる（`projects-${userId}`）
+  - キー変更時は自動的に: (1) 旧observerの購読解除、(2) 新observerの作成、(3) 新effectの実行。gcTimeで旧エントリは30秒後にGC
+  - `EffectProvider` には `layer` prop が必須。サービス不要なら `Layer.empty` を渡す
+  - 親のIDが変わった時に子の選択状態をリセットするのはReact側の責務（`setSelectedProjectId(null)`）
+---
