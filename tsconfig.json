@@ -37,6 +37,7 @@
     { "path": "examples/database-connection" },
     { "path": "examples/optimistic-updates" },
     { "path": "examples/dependent-queries" },
+    { "path": "examples/form-with-validation" },
     { "path": "tsconfig.node.json" }
   ],
   "files": []
