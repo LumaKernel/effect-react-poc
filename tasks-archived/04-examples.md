@@ -65,3 +65,52 @@
 - [x] セマフォで並行数制限（Effect.makeSemaphore）
 
 **示す概念**: 構造化並行性、セマフォ、race
+
+## エラー処理系
+
+### 4.8 typed-errors: 型付きエラーハンドリング
+
+- [x] Data.TaggedError で複数のエラー型定義
+- [x] Effect.catchTag でエラー分岐
+- [x] UI上でエラー種別に応じた表示切り替え
+- [x] Cause<E>のパターンマッチング
+
+**示す概念**: 型付きエラー、Cause、ErrorBoundary統合
+
+### 4.9 retry-with-fallback: リトライとフォールバック
+
+- [x] プライマリAPI → リトライ → フォールバックAPI → ローカルキャッシュ
+- [x] Schedule.compose でリトライ戦略構成
+- [x] リトライ進捗の可視化（何回目、次のリトライまで）
+- [x] 手動リトライボタン
+
+**示す概念**: Schedule、リトライ、フォールバック、UI状態
+
+## リソース管理系
+
+### 4.10 resource-cleanup: リソースクリーンアップ
+
+- [x] EventListener登録/解除
+- [x] setInterval管理
+- [x] AbortController統合
+- [x] 全てをuseEffectScope内で管理
+
+**示す概念**: Scope、addFinalizer、acquireRelease
+
+### 4.11 database-connection: 接続プール
+
+- [x] IndexedDB接続をEffect.acquireReleaseで管理
+- [x] Layer.scopedで接続プールサービス
+- [x] コンポーネントライフサイクルと独立したプールライフサイクル
+
+**示す概念**: Layer.scoped、リソースの階層的管理
+
+## 高度なパターン
+
+### 4.12 optimistic-updates: 楽観的更新
+
+- [x] Todoの完了トグルを楽観的に更新
+- [x] 失敗時のロールバックアニメーション
+- [x] 複数の楽観的更新が同時進行
+
+**示す概念**: 楽観的更新、ロールバック
